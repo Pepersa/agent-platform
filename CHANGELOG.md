@@ -21,6 +21,12 @@ prevents, because every one of them was found in production use.
 
 ### Added
 
+- **A bilingual README with a language switcher.** `README.md` is now the English landing page and
+  `README.zh-CN.md` carries a full Simplified Chinese translation of it — same sections, same
+  tables, same code blocks, same relative links. Both files carry a text-only switcher in the header
+  linking to the other, so a reader can read either language straight from GitHub or from a local
+  checkout. The English README also lists `README.zh-CN.md` in its documentation index.
+
 - **Configurable ReAct round limit on `/chat`.** The endpoint previously accepted no round budget
   at all, so the server always applied the hardcoded value regardless of what the client asked for.
   `ChatRequest.max_rounds` (range 1-64) is now honoured per request, and `AGENT_MAX_ROUNDS` sets the

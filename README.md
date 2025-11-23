@@ -1,5 +1,9 @@
 # Agent Platform
 
+<div align="center">
+  <a href="README.zh-CN.md">中文</a> | <b>English</b>
+</div>
+
 A **local-first RAG + agent platform** for engineering teams: a FastAPI backend driving a LangGraph
 state machine, two local `llama.cpp` inference servers (GPU + CPU), a hybrid-retrieval knowledge base
 with cross-encoder reranking, a 13-tool catalog with human-in-the-loop approval gates, a code-workspace
@@ -1375,6 +1379,8 @@ those components and not to this repository's code.
 | [`docs/troubleshooting.md`](docs/troubleshooting.md) | Each issue as symptom, cause, and fix, with the actual error strings. |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | Contribution guide, conventions, commit and PR conventions, documentation expectations. |
 | [`CHANGELOG.md`](CHANGELOG.md) | Release history in Keep a Changelog format. |
+| [`README.md`](README.md) | This file: the English landing page, kept in section-for-section sync with the Chinese translation. |
+| [`README.zh-CN.md`](README.zh-CN.md) | The full Simplified Chinese translation of this README, kept in section-for-section sync with it. |
 
 ### Chinese design documents (preserved as written)
 
