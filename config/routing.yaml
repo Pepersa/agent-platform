@@ -1,0 +1,140 @@
+# 模型路由配置（Model Router）
+#
+# 对应设计文档：
+#   《01_架构方案_RAG_Agent.md》§2.3 路由层 →「模型路由」
+#       A. 自研 ModelRouter + OpenAI 兼容接口（可控、可插拔）
+#       原则 6「模型可替换」：Prompt、评测集、Tool Schema 三者解耦
+#   《01_架构方案_RAG_Agent.md》§2.9 推理模型层（本地 OpenAI 兼容推理服务）
+#   《06_代码模型接入策略.md》（代码专用模型的选型、装机与降级保护）
+#
+# 本地推理端点（Windows 原生 llama.cpp llama-server，非 vLLM/SGLang）：
+#   gpt-oss-20b    → 127.0.0.1:8080   （复杂推理 / 工具调用 / ReAct 主循环，GPU 全 offload）
+#   qwen2.5-14b    → 127.0.0.1:8081   （中文生成 / 评测 / 摘要，CPU 推理 -ngl 0）
+#   qwen2.5-coder-14b → 127.0.0.1:8082 （代码专用，**待安装**，见 docs/06）
+#
+# 修改本文件后无需改代码：LLMRouter 启动时自动读取。
+
+# 各模型端点配置
+#
+# ⚠️ capabilities（能力标签）的含义 —— **降级保护**的唯一依据：
+#   路由项在 routes: 里可以声明 `requires: [code, tool_call]`，
+#   路由器会**剔除**降级链中不具备这些能力的模型；
+#   若剔除后链为空 → **显式报错**，绝不静默把代码任务降级到
+#   不具备代码能力的通用对话模型上（详见 docs/06 §4）。
+#
+#   可用标签：code / tool_call / reasoning / chinese / long_context / vision
+models:
+  gpt-oss-20b:
+    base_url: http://127.0.0.1:8080/v1
+    model: gpt-oss-20b
+    reasoning_effort: medium
+    temperature: 0.2
+    max_tokens: 2048
+    api_key: local
+    timeout: 180
+    # OpenAI 官方模型卡覆盖 SWE-bench Verified / Codeforces / τ-bench function calling
+    capabilities: [code, tool_call, reasoning, chinese]
+
+  qwen2.5-14b:
+    base_url: http://127.0.0.1:8081/v1
+    model: qwen2.5-14b
+    reasoning_effort: low
+    temperature: 0.2
+    max_tokens: 2048
+    api_key: local
+    timeout: 180
+    # ⚠️ **刻意不给 code 标签**
+    #   这是通用对话模型（Qwen2.5-14B-Instruct），不是 Coder 型号。
+    #   早期版本的 agent/tool_call 路由把它当 fallback，代码任务一旦降级到它
+    #   质量会「静默」崩塌 —— 用户看不出任何异常，只会觉得「这模型今天变差了」。
+    capabilities: [tool_call, reasoning, chinese]
+
+  # ------------------------------------------------------------------
+  # qwen2.5-coder-14b —— **代码专用模型占位（尚未安装）**
+  # ------------------------------------------------------------------
+  # ⚠️⚠️ **本模型当前未安装，端点也不存在。**
+  #   这是一个**占位配置**：先把路由与能力标签铺好，
+  #   等模型按 docs/06 §6 的步骤装好、llama-server 起在 :8082 之后即可生效，
+  #   **不需要再改任何代码**。
+  #
+  #   安装要点（详见 docs/06_代码模型接入策略.md）：
+  #     · GGUF: Qwen2.5-Coder-14B-Instruct-Q4_K_M.gguf（8.99 GB）
+  #     · 显存: 本机 16 GB **装不下**（gpt-oss-20b 已占 15.6 GB），
+  #       故按「CPU 推理 + 按需换入」或「顺序换入」策略部署，
+  #       **不要**与 gpt-oss-20b 同时全量驻留 GPU。
+  #     · 端口: 8082（避开已在用的 8080 / 8081）
+  #     · 上下文: 32768
+  qwen2.5-coder-14b:
+    base_url: http://127.0.0.1:8082/v1
+    model: qwen2.5-coder-14b
+    reasoning_effort: low
+    temperature: 0.1
+    max_tokens: 4096
+    api_key: local
+    timeout: 300
+    # 代码专用模型：具备 code + tool_call
+    capabilities: [code, tool_call, reasoning, chinese]
+    # ⚠️ 标记为「未安装」：/models 接口会如实展示，前端可据此提示用户
+    installed: false
+    description: 代码专用模型（Qwen2.5-Coder-14B-Instruct Q4_K_M）—— 尚未安装，见 docs/06
+
+# 任务类型 → 主模型 → 降级链
+#
+# fallback 列表中靠前的为主模型，靠后为降级备选。
+#
+# `requires:` 声明该路由项**必须**具备的能力标签：
+#   · 路由器会把降级链中**不具备**这些标签的模型剔除；
+#   · 剔除后链为空 → 抛 RoutingCapabilityError（显式失败，不静默降级）。
+#   · 未声明 `requires:` 的路由项视为无能力约束，链原样保留。
+routes:
+  # ------------------------------------------------------------------
+  # 代码专用路由（**新**）—— 写代码 / 改代码 / 重构 / 代码解释
+  # ------------------------------------------------------------------
+  # 主模型 qwen2.5-coder-14b **尚未安装**（见上方 models 段的说明）。
+  # 降级链只放具备 code 能力的模型 —— 当前只有 gpt-oss-20b。
+  # ⚠️ 绝不要把 qwen2.5-14b（通用对话模型）加进这条链，
+  #    否则代码任务会静默降级到非代码模型上。
+  code:
+    fallback: [qwen2.5-coder-14b, gpt-oss-20b]
+    requires: [code]
+
+  # ------------------------------------------------------------------
+  # 复杂推理、工具调用、ReAct 主循环
+  # ------------------------------------------------------------------
+  # ⚠️ 这三条链**去掉了 qwen2.5-14b**：它是通用对话模型，不具备 code 能力，
+  #    而 Agent 主循环会调用 ws_write_file / ws_edit_file 写代码。
+  #    保留它当 fallback 等于「代码任务降级到非代码模型」，质量静默崩塌。
+  #    现在：gpt-oss-20b 挂了 → **显式报错**（RoutingCapabilityError），
+  #    由运维/用户决定是否启用 code 模型，而不是悄悄产出垃圾代码。
+  agent:
+    fallback: [gpt-oss-20b]
+    requires: [code, tool_call]
+  reasoning:
+    fallback: [gpt-oss-20b]
+    requires: [reasoning]
+  tool_call:
+    fallback: [gpt-oss-20b]
+    requires: [tool_call]
+
+  # 只读问答模式（Ask）：允许调用只读工具，工具调用轮次有限 → 需要推理能力
+  ask:
+    fallback: [gpt-oss-20b]
+    requires: [reasoning]
+
+  # 规划模式（Plan）：只产出结构化计划，不调用任何工具 → 需要结构化输出能力
+  plan:
+    fallback: [gpt-oss-20b]
+    requires: [reasoning]
+
+  # 中文生成、评测打分、摘要
+  # （这三项不写代码，无能力约束，降级链保留 qwen2.5-14b 兜底）
+  chinese:
+    fallback: [qwen2.5-14b, gpt-oss-20b]
+  eval:
+    fallback: [qwen2.5-14b, gpt-oss-20b]
+  summarize:
+    fallback: [qwen2.5-14b, gpt-oss-20b]
+
+  # 兜底
+  default:
+    fallback: [gpt-oss-20b, qwen2.5-14b]

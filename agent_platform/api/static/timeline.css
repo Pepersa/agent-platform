@@ -1,0 +1,810 @@
+/* ==========================================================================
+   Live Timeline —— 统一垂直事件时间线
+   --------------------------------------------------------------------------
+   调研规格：docs/05_Agent_UI_设计调研与规格.md 第 C 节（方案 C）。
+   实现要点：
+     · 垂直导轨 + 节点圆点 + 连接线（几何完全由 CSS 控制，零 JS 测量）
+     · 折叠块用 CSS Grid ``1fr ↔ 0fr``（零 JS 测量、零布局抖动）
+     · 审批是**零时长事件** → 菱形点，不是时间条（反模式 E.6）
+     · 运行中的节点用斜纹（诚实语义），不假装已完成
+     · 结果截断用 ``max-height`` + ``mask-image`` 渐隐（不是硬裁剪）
+
+   **零渐变约定**：本文件不使用 ``background-image: linear-gradient()``。
+   ``mask-image`` 内部的渐变只用于**裁剪蒙版**，不产生背景色带，
+   符合项目「零 CSS 渐变」的视觉规范（渐变会把 IDE 质感变成消费级 App）。
+   ========================================================================== */
+
+.tl-root {
+  position: relative;
+  padding: var(--sp-3) var(--sp-4) var(--sp-6) var(--sp-4);
+  min-height: 100%;
+}
+
+/* ----------------------------------------------------------------------
+   导轨（rail）：整条时间线的左侧竖线
+   ---------------------------------------------------------------------- */
+.tl-root::before {
+  content: "";
+  position: absolute;
+  left: 25px;
+  top: var(--sp-3);
+  bottom: var(--sp-4);
+  width: 1px;
+  background: var(--line);
+  pointer-events: none;
+}
+
+/* ----------------------------------------------------------------------
+   节点
+   ---------------------------------------------------------------------- */
+.tl-node {
+  position: relative;
+  padding-left: 38px;
+  margin-bottom: 2px;
+}
+
+.tl-node-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-height: 26px;
+  padding: 2px var(--sp-2);
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  user-select: none;
+  transition: background 120ms ease-out;
+}
+.tl-node-head:hover { background: var(--bg-3); }
+.tl-node-head:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+.tl-node[data-collapsible="false"] > .tl-node-head { cursor: default; }
+.tl-node[data-collapsible="false"] > .tl-node-head:hover { background: transparent; }
+
+/* ---- 状态点 ---- */
+.tl-dot {
+  position: absolute;
+  left: 21px;
+  top: 9px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--bg-4);
+  border: 2px solid var(--bg-2);
+  box-shadow: 0 0 0 1px var(--line);
+  flex: none;
+}
+.tl-node[data-status="ok"]   .tl-dot { background: var(--ok); }
+.tl-node[data-status="err"]  .tl-dot { background: var(--err); }
+.tl-node[data-status="run"]  .tl-dot {
+  background: var(--run);
+  animation: tl-pulse 1600ms ease-in-out infinite;
+}
+.tl-node[data-status="wait"] .tl-dot { background: var(--hitl); }
+.tl-node[data-status="skip"] .tl-dot {
+  background: var(--bg-5);
+  box-shadow: 0 0 0 1px var(--line-strong);
+}
+.tl-node[data-status="pending"] .tl-dot {
+  background: var(--bg-4);
+  box-shadow: 0 0 0 1px var(--line-strong);
+}
+
+/* ---- 头部的文本列 ---- */
+.tl-time {
+  font-size: var(--fs-xs);
+  color: var(--fg-faint);
+  font-variant-numeric: tabular-nums;
+  font-family: var(--mono);
+  flex: none;
+}
+.tl-kind {
+  font-size: var(--fs-md);
+  color: var(--fg);
+  font-weight: 500;
+  flex: none;
+  max-width: 190px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tl-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: var(--fs-md);
+  color: var(--fg-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tl-dur {
+  font-size: var(--fs-xs);
+  color: var(--fg-faint);
+  font-variant-numeric: tabular-nums;
+  font-family: var(--mono);
+  flex: none;
+}
+.tl-tok {
+  font-size: var(--fs-xs);
+  color: var(--fg-faint);
+  font-variant-numeric: tabular-nums;
+  font-family: var(--mono);
+  flex: none;
+}
+
+/* ---- 耗时比例条：宽度正比于耗时（垂直时间线的横向时间轴等价物）---- */
+.tl-durbar {
+  display: inline-block;
+  width: 56px;
+  height: 4px;
+  border-radius: var(--r-pill);
+  background: var(--bg-4);
+  overflow: hidden;
+  flex: none;
+  vertical-align: middle;
+}
+.tl-durbar-fill {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  opacity: .8;
+  border-radius: var(--r-pill);
+}
+.tl-node[data-kind="thinking"] .tl-durbar-fill { background: var(--accent-2); }
+.tl-node[data-status="err"] .tl-durbar-fill { background: var(--err); }
+.tl-node[data-status="ok"] .tl-durbar-fill { background: var(--ok); opacity: .7; }
+
+/* ---- 状态徽章 ---- */
+.tl-badge {
+  font-size: var(--fs-xs);
+  padding: 1px 6px;
+  border-radius: var(--r-pill);
+  border: 1px solid transparent;
+  flex: none;
+  white-space: nowrap;
+}
+.tl-badge.s-ok      { color: var(--ok);   background: var(--ok-soft); }
+.tl-badge.s-err     { color: var(--err);  background: var(--err-soft); }
+.tl-badge.s-run     { color: var(--run);  background: var(--run-soft); }
+.tl-badge.s-wait    { color: var(--hitl); background: var(--hitl-soft, var(--hitl-soft)); }
+.tl-badge.s-skip    { color: var(--fg-faint); background: transparent; border-color: var(--line-strong); }
+.tl-badge.s-pending { color: var(--fg-dim); background: transparent; border-color: var(--line-strong); }
+
+/* ---- 折叠箭头 ---- */
+.tl-caret {
+  color: var(--fg-faint);
+  flex: none;
+  font-size: 10px;
+  line-height: 1;
+  transition: transform 180ms cubic-bezier(0.2, 0, 0.38, 0.9);
+}
+.tl-node[data-open="true"] .tl-caret { transform: rotate(90deg); }
+.tl-node[data-collapsible="false"] .tl-caret { visibility: hidden; }
+
+/* ----------------------------------------------------------------------
+   折叠面板 —— CSS Grid 1fr ↔ 0fr（零 JS 测量）
+
+   **为什么必须写 minmax(0, 0fr) 而不是裸的 0fr**：
+     `0fr` 的轨道自动最小值是「内容最小尺寸」。`.tl-panel-inner` 带上下
+     内边距（--sp-1 + --sp-2 = 12px），这个内边距会被算进内容最小尺寸，
+     于是折叠态的轨道塌不成 0，而是残留 12px。
+   **为什么必须去掉 align-self: start**：
+     `align-self: start` 让内层盒子按**自身内容高度**布局（而不是被轨道
+     拉伸），于是折叠态（轨道 0px）里它仍然有 100~300px 高，
+     直接溢出面板、压在下一个节点（工具调用行）头上 —— 这就是
+     「工具调用 ws_write_file」和下方推理文字叠在一起、排版错乱的原因。
+     改成 stretch（默认）后内层被轨道高度夹住，overflow:hidden 正常裁切。
+   **为什么折叠态要清掉内边距**：
+     border-box 下盒高不能小于 padding 之和，折叠态若仍留 12px 内边距，
+     内层依旧会撑出 12px。展开态再把内边距加回来。
+   ---------------------------------------------------------------------- */
+.tl-panel {
+  display: grid;
+  grid-template-rows: minmax(0, 0fr);
+  transition: grid-template-rows 180ms cubic-bezier(0.2, 0, 0.38, 0.9);
+}
+.tl-node[data-open="true"] .tl-panel { grid-template-rows: minmax(0, 1fr); }
+.tl-node[data-collapsible="false"] .tl-panel { grid-template-rows: minmax(0, 1fr); }
+.tl-panel-inner {
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  box-sizing: border-box;
+  padding: 0;
+}
+/* 展开态才给上下留白（折叠态必须为 0，否则会残留 12px 空隙） */
+.tl-node[data-open="true"] .tl-panel-inner,
+.tl-node[data-collapsible="false"] .tl-panel-inner {
+  padding: var(--sp-1) 0 var(--sp-2) 0;
+}
+
+/* ----------------------------------------------------------------------
+   节点类型微调
+   ---------------------------------------------------------------------- */
+/* 用户提问 —— 右对齐气泡，不折叠 */
+.tl-node[data-kind="user"] {
+  padding-left: 0;
+  margin-bottom: var(--sp-3);
+}
+.tl-node[data-kind="user"] .tl-node-head {
+  justify-content: flex-end;
+  padding: 0;
+}
+.tl-node[data-kind="user"] .tl-bubble {
+  max-width: 78%;
+  padding: var(--sp-2) var(--sp-3);
+  background: var(--bg-4);
+  border-radius: var(--r-md);
+  font-size: var(--fs-base);
+  color: var(--fg);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.tl-node[data-kind="user"] .tl-dot { display: none; }
+
+/* 最终回答 —— 不折叠 */
+.tl-node[data-kind="assistant"] {
+  padding-left: 38px;
+}
+.tl-node[data-kind="assistant"] .tl-answer {
+  padding: var(--sp-2) var(--sp-3);
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  font-size: var(--fs-base);
+  line-height: 1.55;
+  color: var(--fg);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* 审批节点 —— 菱形（零时长事件不画成条） */
+.tl-node[data-kind="approval"] .tl-dot {
+  border-radius: 2px;
+  transform: rotate(45deg);
+  width: 10px;
+  height: 10px;
+  left: 20.5px;
+  top: 8px;
+  background: var(--hitl);
+  box-shadow: 0 0 0 1px var(--hitl-bar-line);
+}
+.tl-node[data-kind="approval"][data-status="ok"] .tl-dot { background: var(--ok); }
+.tl-node[data-kind="approval"][data-status="err"] .tl-dot { background: var(--err); }
+
+/* 检查点节点 —— 方形标记 */
+.tl-node[data-kind="checkpoint"] .tl-dot {
+  border-radius: 1px;
+  width: 9px;
+  height: 9px;
+  left: 21px;
+  background: var(--accent-2);
+}
+
+/* 错误节点 —— 左侧红轨 */
+.tl-node[data-kind="error"] .tl-rail {
+  position: absolute;
+  left: 25px;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--err);
+}
+
+/* ----------------------------------------------------------------------
+   思考节点：3 级信号条（复用 .obs-sig 的高度编码）
+   ---------------------------------------------------------------------- */
+.tl-sig {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 14px;
+  flex: none;
+}
+.tl-sig-bar {
+  width: 3px;
+  border-radius: var(--r-pill);
+  background: var(--accent-2);
+  flex: none;
+}
+.tl-sig-bar.l1 { height: 4px; }
+.tl-sig-bar.l2 { height: 9px; }
+.tl-sig-bar.l3 { height: 14px; }
+.tl-sig-bar.l2 { background: var(--accent); }
+
+/* ----------------------------------------------------------------------
+   展开区内容
+   ---------------------------------------------------------------------- */
+.tl-zone {
+  margin-top: var(--sp-2);
+}
+.tl-zone-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-1);
+}
+.tl-zone-title {
+  font-size: var(--fs-sm);
+  color: var(--fg-dim);
+  letter-spacing: .02em;
+}
+.tl-zone .grow { flex: 1 1 auto; }
+
+/* 参数 / 结果代码块 */
+.tl-code {
+  margin: 0;
+  padding: var(--sp-2) var(--sp-3);
+  background: var(--bg-0);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  line-height: 1.55;
+  color: var(--fg);
+  white-space: pre;
+  overflow: auto;
+  max-height: 220px;
+  tab-size: 2;
+}
+/* 截断态：max-height + mask-image 渐隐（不是硬裁剪，用户知道下面还有内容）
+   注意：mask 渐变里的 #000 是**蒙版 alpha**，不是"黑色"这个颜色，
+   必须保持字面量（改成主题色会改变遮罩的渐隐方向与浓度）。 */
+.tl-code.is-clipped {
+  max-height: 96px;
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(180deg, #000 60%, transparent 100%);
+  mask-image: linear-gradient(180deg, #000 60%, transparent 100%);
+}
+.tl-text {
+  font-size: var(--fs-base);
+  line-height: 1.55;
+  color: var(--fg-dim);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.tl-note {
+  font-size: var(--fs-sm);
+  color: var(--fg-faint);
+  margin-top: var(--sp-1);
+}
+
+/* 「展开全部输出」/「收起」按钮 —— 容器内联按钮无边框（反模式 E.7） */
+.tl-more {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  font-size: var(--fs-sm);
+  cursor: pointer;
+  padding: 2px 0;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.tl-more:hover { color: var(--fg); }
+.tl-more:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
+
+/* 复制按钮 */
+.tl-copy {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--fg-faint);
+  font: inherit;
+  font-size: var(--fs-sm);
+  cursor: pointer;
+  padding: 1px 4px;
+  border-radius: var(--r-sm);
+}
+.tl-copy:hover { background: var(--bg-4); color: var(--fg); }
+.tl-copy:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+.tl-copy.done { color: var(--ok); }
+
+/* 错误块 */
+.tl-err {
+  border: 1px solid var(--err);
+  border-radius: var(--r-md);
+  padding: var(--sp-2) var(--sp-3);
+  background: var(--err-soft);
+}
+.tl-err-code {
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  color: var(--err);
+  margin-right: var(--sp-2);
+}
+.tl-err-msg { font-size: var(--fs-md); color: var(--fg); }
+.tl-err-hint { font-size: var(--fs-sm); color: var(--fg-dim); margin-top: var(--sp-1); }
+
+/* ----------------------------------------------------------------------
+   审批卡（内联在时间线上，不是弹窗）
+   ---------------------------------------------------------------------- */
+.appr {
+  border: 1px solid var(--hitl-line);
+  background: var(--hitl-bar-bg);
+  border-radius: var(--r-md);
+  padding: var(--sp-2) var(--sp-3);
+  margin-top: var(--sp-2);
+}
+.appr-cmd {
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  color: var(--fg);
+  margin-bottom: var(--sp-2);
+  word-break: break-all;
+}
+.appr-kv {
+  display: flex;
+  gap: var(--sp-2);
+  font-size: var(--fs-sm);
+  color: var(--fg-dim);
+  margin-bottom: 2px;
+}
+.appr-kv b { color: var(--fg); font-weight: 500; }
+.appr-actions {
+  display: flex;
+  gap: var(--sp-2);
+  align-items: center;
+  flex-wrap: wrap;
+  margin-top: var(--sp-2);
+}
+.appr-btn {
+  appearance: none;
+  height: 22px;
+  padding: 0 var(--sp-3);
+  border-radius: var(--r-sm);
+  font-size: var(--fs-md);
+  cursor: pointer;
+  border: 1px solid var(--line-strong);
+  background: var(--bg-4);
+  color: var(--fg);
+  transition: background 120ms ease-out, border-color 120ms ease-out;
+}
+.appr-btn:hover { background: var(--bg-5); }
+.appr-btn:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
+.appr-btn.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent-btn);
+  font-weight: 600;
+}
+.appr-btn.primary:hover { filter: brightness(1.1); }
+.appr-btn.danger:hover { border-color: var(--err); color: var(--err); }
+.appr-btn[disabled] { opacity: .55; cursor: default; }
+.appr-reason {
+  height: 22px;
+  flex: 1 1 180px;
+  min-width: 160px;
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  color: var(--fg);
+  font-size: var(--fs-md);
+  padding: 0 var(--sp-2);
+  font-family: inherit;
+}
+.appr-reason:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+
+/* 折叠态头部直接挂的审批按钮（Cursor 做法：不展开也能批） */
+.tl-head-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  flex: none;
+}
+.tl-head-btn {
+  appearance: none;
+  height: 20px;
+  padding: 0 var(--sp-2);
+  border-radius: var(--r-sm);
+  font-size: var(--fs-sm);
+  cursor: pointer;
+  border: 1px solid var(--line-strong);
+  background: var(--bg-4);
+  color: var(--fg);
+  transition: background 120ms ease-out, border-color 120ms ease-out;
+}
+.tl-head-btn:hover { background: var(--bg-5); }
+.tl-head-btn:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
+.tl-head-btn.ok { border-color: var(--ok); color: var(--ok); }
+.tl-head-btn.ok:hover { background: var(--ok-soft); }
+.tl-head-btn.no { border-color: var(--err); color: var(--err); }
+.tl-head-btn.no:hover { background: var(--err-soft); }
+.tl-head-btn[disabled] { opacity: .55; cursor: default; }
+
+/* 审批风险徽标 */
+.tl-risk {
+  font-size: var(--fs-xs);
+  padding: 1px 6px;
+  border-radius: var(--r-pill);
+  flex: none;
+  white-space: nowrap;
+}
+.tl-risk.high { color: var(--err); background: var(--err-soft); }
+.tl-risk.mid  { color: var(--warn); background: var(--warn-soft); }
+.tl-risk.low  { color: var(--fg-dim); background: transparent; border: 1px solid var(--line-strong); }
+
+/* ----------------------------------------------------------------------
+   sticky run header
+   ---------------------------------------------------------------------- */
+.tl-header {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: var(--bg-1);
+  border-bottom: 1px solid var(--line);
+  padding: var(--sp-2) var(--sp-4);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+  font-size: var(--fs-md);
+  color: var(--fg-dim);
+}
+.tl-header .mono { font-variant-numeric: tabular-nums; font-family: var(--mono); }
+.tl-header-model { color: var(--fg); font-weight: 500; }
+.tl-header-sep { color: var(--line-strong); }
+
+/* 上下文占用条（百分比 + hover 明细） */
+.tl-ctx {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  cursor: default;
+}
+.tl-ctx-bar {
+  width: 56px;
+  height: 4px;
+  border-radius: var(--r-pill);
+  background: var(--bg-4);
+  overflow: hidden;
+  flex: none;
+}
+.tl-ctx-fill {
+  display: block;
+  height: 100%;
+  background: var(--ok);
+  transition: width 400ms cubic-bezier(0.2, 0, 0.38, 0.9);
+}
+.tl-ctx.is-high .tl-ctx-fill { background: var(--warn); }
+.tl-ctx.is-full .tl-ctx-fill { background: var(--err); }
+.tl-ctx-num {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--fs-xs);
+  color: var(--fg-faint);
+}
+.tl-ctx.is-high .tl-ctx-num { color: var(--warn); }
+.tl-ctx.is-full .tl-ctx-num { color: var(--err); }
+/* hover 展开明细 */
+.tl-ctx-detail {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  min-width: 220px;
+  padding: var(--sp-2) var(--sp-3);
+  background: var(--bg-5);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-md);
+  box-shadow: var(--sh-md);
+  font-size: var(--fs-sm);
+  color: var(--fg-dim);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 120ms ease-out, visibility 120ms ease-out;
+  z-index: 20;
+  white-space: normal;
+}
+.tl-ctx:hover .tl-ctx-detail,
+.tl-ctx:focus-within .tl-ctx-detail {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+}
+.tl-ctx-detail .tl-ctx-row {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--sp-3);
+}
+.tl-ctx-detail .tl-ctx-row b { color: var(--fg); font-family: var(--mono); font-weight: 500; }
+
+/* ----------------------------------------------------------------------
+   底部工具条（筛选 + 耗时视图切换）
+   ---------------------------------------------------------------------- */
+.tl-tools {
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+  padding: var(--sp-1) var(--sp-4);
+  background: var(--bg-1);
+  border-top: 1px solid var(--line);
+  font-size: var(--fs-sm);
+  color: var(--fg-faint);
+}
+.tl-filter {
+  appearance: none;
+  height: 20px;
+  padding: 0 var(--sp-2);
+  border-radius: var(--r-sm);
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--fg-dim);
+  font: inherit;
+  font-size: var(--fs-sm);
+  cursor: pointer;
+  transition: background 120ms ease-out, color 120ms ease-out;
+  white-space: nowrap;
+}
+.tl-filter:hover { background: var(--bg-4); color: var(--fg); }
+.tl-filter[aria-pressed="true"] {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: var(--accent-line);
+}
+.tl-filter:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+.tl-tools .grow { flex: 1 1 auto; }
+
+/* 筛选按钮组（观测头部） */
+.tl-filter-group {
+  display: inline-flex;
+  align-items: stretch;
+  gap: 2px;
+  padding: 2px;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  scrollbar-width: none;
+  max-width: 100%;
+  min-width: 0;
+}
+.tl-filter-group::-webkit-scrollbar { height: 0; }
+.tl-filter-group .tl-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  height: 20px;
+}
+
+/* 「全部视图」嵌在时间线容器里 —— 取消二次的外层 padding */
+.tl-viewport .obs-page { height: auto; background: transparent; }
+.tl-viewport .obs-body { padding: var(--sp-3) 0 0 0; overflow: visible; }
+.tl-viewport .obs-head { background: transparent; border-bottom: 1px solid var(--line-soft); }
+
+/* ----------------------------------------------------------------------
+   运行中状态指示器（位于消息流末端，不是页面上方）
+   ---------------------------------------------------------------------- */
+.tl-live {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-sm);
+  color: var(--fg-dim);
+}
+.tl-dots {
+  display: inline-flex;
+  gap: 3.5px;
+  position: relative;
+  top: .26em;
+}
+.tl-dots > span {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: var(--accent);
+  opacity: 0;
+  animation: 1.9s cubic-bezier(.4, 0, .2, 1) infinite tl-dot;
+}
+.tl-dots > span:nth-child(2) { animation-delay: .15s; }
+.tl-dots > span:nth-child(3) { animation-delay: .3s; }
+@keyframes tl-dot {
+  0%, 8%   { opacity: 0; transform: translateY(2px); }
+  22%      { opacity: 1; transform: translateY(-2.5px); }
+  36%, 70% { opacity: 1; transform: translateY(0); }
+  90%, 100% { opacity: 0; transform: translateY(0); }
+}
+
+/* 运行中的节点：斜纹导轨（诚实语义 —— 未完成不假装已完成） */
+.tl-node[data-status="run"]::before {
+  content: "";
+  position: absolute;
+  left: 25px;
+  top: 0;
+  bottom: -2px;
+  width: 1px;
+  background: var(--accent-line);
+  animation: tl-blink 1600ms ease-in-out infinite;
+}
+@keyframes tl-pulse {
+  0%, 100% { opacity: .55; }
+  50%      { opacity: 1; }
+}
+@keyframes tl-blink {
+  0%, 100% { opacity: .35; }
+  50%      { opacity: .9; }
+}
+
+/* 节点进入动效 */
+.tl-node.tl-enter { animation: tl-enter 240ms cubic-bezier(.3, .7, .4, 1); }
+@keyframes tl-enter {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* ----------------------------------------------------------------------
+   图例
+   ---------------------------------------------------------------------- */
+.tl-legend {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+  padding: var(--sp-2) 0 var(--sp-1) 38px;
+  font-size: var(--fs-xs);
+  color: var(--fg-faint);
+}
+.tl-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.tl-legend-note { color: var(--fg-mute); }
+
+/* ----------------------------------------------------------------------
+   空状态
+   ---------------------------------------------------------------------- */
+.tl-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-2);
+  padding: var(--sp-6) var(--sp-4);
+  min-height: 140px;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--r-md);
+  background: var(--bg-1);
+  text-align: center;
+}
+.tl-empty-ico { color: var(--fg-mute); opacity: .8; }
+.tl-empty-title { font-size: var(--fs-base); color: var(--fg); }
+.tl-empty-hint {
+  font-size: var(--fs-sm);
+  color: var(--fg-faint);
+  max-width: 460px;
+  line-height: 1.6;
+}
+
+/* ----------------------------------------------------------------------
+   耗时视图（保留原 Trace Waterfall 的可达性 —— 作为时间线的视图切换）
+   ---------------------------------------------------------------------- */
+.tl-viewport { display: none; }
+.tl-viewport.is-active { display: block; }
+
+/* ----------------------------------------------------------------------
+   降低动效偏好 —— WCAG 2.3.3
+   ---------------------------------------------------------------------- */
+@media (prefers-reduced-motion: reduce) {
+  .tl-panel,
+  .tl-caret { transition: none; }
+  .tl-dots > span,
+  .tl-node[data-status="run"] .tl-dot,
+  .tl-node[data-status="run"]::before { animation: none; }
+  .tl-dots > span { opacity: 1; transform: none; }
+  .tl-node[data-status="run"] .tl-dot { opacity: .6; }
+  .tl-node[data-status="run"]::before { opacity: .6; }
+  .tl-node.tl-enter { animation: none; }
+  .tl-ctx-fill { transition: none; }
+  .tl-ctx-detail { transition: none; }
+}

@@ -1,0 +1,401 @@
+# Kubernetes 部署清单 —— 生产形态（对应 docs\01 §2.13「工程基座」）
+#
+# ⚠️ 本机当前 WSL 与 Docker 服务均为 Disabled，k8s 集群**跑不起来**。
+#    本目录的定位是「生产形态蓝图 + 可移植编排」，本地开发走 deploy\start_servers.ps1。
+#
+# 目标集群形态（生产）：
+#   - kind / k3d 单节点集群用于本地验证，或公司内部 K8s 1.28+
+#   - NVIDIA GPU Operator + NVIDIA Container Toolkit
+#   - 模型服务用 llama-server（生产建议用官方 llama.cpp 镜像或自建镜像）
+#   - 推理侧 GPU 节点，Agent API 侧 CPU 节点，资源完全隔离
+#
+# 部署顺序：
+#   kubectl apply -f k8s/00-namespace.yaml
+#   kubectl apply -f k8s/10-config.yaml
+#   kubectl apply -f k8s/20-postgres.yaml
+#   kubectl apply -f k8s/30-inference.yaml
+#   kubectl apply -f k8s/40-api.yaml
+#   kubectl -n agent-platform get pods -w
+
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: agent-platform
+  labels:
+    name: agent-platform
+---
+# ============================================================================
+# 10. ConfigMap / Secret —— 对应 docs\01 §2.13「配置中心」+「密钥管理」
+# ============================================================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: agent-config
+  namespace: agent-platform
+data:
+  LLM_BASE_URL: "http://llama-gptoss.agent-platform.svc.cluster.local:8080/v1"
+  LLM_MODEL: "gpt-oss-20b"
+  LLM_SECONDARY_BASE_URL: "http://llama-qwen.agent-platform.svc.cluster.local:8081/v1"
+  LLM_SECONDARY_MODEL: "qwen2.5-14b"
+  LLM_REASONING_EFFORT: "medium"
+  LLM_TEMPERATURE: "0.2"
+  VECTOR_STORE: "pg"
+  PG_DSN: "postgresql://agent:CHANGE_ME@postgres.agent-platform.svc.cluster.local:5432/agentdb"
+  RECALL_N: "50"
+  TOP_K: "6"
+  RRF_K: "60"
+  MIN_SCORE_THRESHOLD: "0.35"
+  BUDGET_MAX_ROUNDS: "8"
+  BUDGET_MAX_TOKENS: "60000"
+  BUDGET_MAX_TOOL_CALLS: "24"
+  BUDGET_MAX_SECONDS: "900"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: agent-secrets
+  namespace: agent-platform
+type: Opaque
+stringData:
+  PG_PASSWORD: "CHANGE_ME"
+  HF_TOKEN: ""
+---
+# ============================================================================
+# 20. PostgreSQL + pgvector —— 对应 docs\01 §2.13「关系数据库」
+# ============================================================================
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-pvc
+  namespace: agent-platform
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 20Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: agent-platform
+spec:
+  selector:
+    app: postgres
+  ports:
+    - port: 5432
+      targetPort: 5432
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  namespace: agent-platform
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      containers:
+        - name: postgres
+          image: pgvector/pgvector:pg16
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRES_USER
+              value: agent
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: agent-secrets, key: PG_PASSWORD}
+            - name: POSTGRES_DB
+              value: agentdb
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          args:
+            - "postgres"
+            - "-c"
+            - "shared_preload_libraries=pgvector"
+            - "-c"
+            - "max_connections=200"
+          resources:
+            requests: {cpu: "500m", memory: "4Gi"}
+            limits:   {cpu: "2",   memory: "8Gi"}
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+      volumes:
+        - name: data
+          persistentVolumeClaim: {claimName: postgres-pvc}
+---
+# ============================================================================
+# 30. 推理服务 —— 对应 docs\01 §2.9「推理引擎部署」
+#
+# 资源调度要点（呼应 docs\01 §2.9「批处理与调度」「限流与降级」）：
+#   - gpt-oss-20b: GPU 节点，独占一张卡，用 nvidia.com/gpu 资源声明
+#   - qwen2.5-14b: CPU 节点，不占 GPU（对应本地 94GB 内存策略）
+#   - 两者都是 Deployment + HPA，Agent API 通过 Service 访问
+#   - 用 GPU Resource Limit 做配额，超额请求排队而非 OOM
+# ============================================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: llama-gptoss
+  namespace: agent-platform
+spec:
+  selector:
+    app: llama-gptoss
+  ports:
+    - port: 8080
+      targetPort: 8080
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: llama-gptoss
+  namespace: agent-platform
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: llama-gptoss
+  template:
+    metadata:
+      labels:
+        app: llama-gptoss
+      annotations:
+        nvidia.com/gpu: "1"      # 旧版 device plugin 写法；新版用 resources.limits
+    spec:
+      nodeSelector:
+        nvidia.com/gpu.present: "true"
+      containers:
+        - name: llama-server
+          image: ghcr.io/ggml-org/llama.cpp:server-cuda
+          args:
+            - "-m"
+            - "/models/gpt-oss-20b-MXFP4.gguf"
+            - "--host"
+            - "0.0.0.0"
+            - "--port"
+            - "8080"
+            - "--alias"
+            - "gpt-oss-20b"
+            - "-ngl"
+            - "99"
+            - "-c"
+            - "32768"
+            - "--parallel"
+            - "4"
+            - "--cache-type-k"
+            - "q8_0"
+            - "--cache-type-v"
+            - "q8_0"
+            - "--flash-attn"
+            - "on"
+            - "--jinja"
+          ports:
+            - containerPort: 8080
+          resources:
+            requests:
+              cpu: "4"
+              memory: "16Gi"
+              nvidia.com/gpu: "1"
+            limits:
+              cpu: "8"
+              memory: "24Gi"
+              nvidia.com/gpu: "1"
+          volumeMounts:
+            - name: models
+              mountPath: /models
+              readOnly: true
+          readinessProbe:
+            httpGet: {path: /health, port: 8080}
+            initialDelaySeconds: 90
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /health, port: 8080}
+            initialDelaySeconds: 180
+            periodSeconds: 30
+      volumes:
+        - name: models
+          persistentVolumeClaim:
+            claimName: models-pvc
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: models-pvc
+  namespace: agent-platform
+spec:
+  accessModes: ["ReadOnlyMany"]
+  resources:
+    requests:
+      storage: 100Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: llama-qwen
+  namespace: agent-platform
+spec:
+  selector:
+    app: llama-qwen
+  ports:
+    - port: 8081
+      targetPort: 8081
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: llama-qwen
+  namespace: agent-platform
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: llama-qwen
+  template:
+    metadata:
+      labels:
+        app: llama-qwen
+    spec:
+      nodeSelector:
+        agent.io/tier: "cpu"     # 与 GPU 节点隔离
+      containers:
+        - name: llama-server
+          image: ghcr.io/ggml-org/llama.cpp:server-cuda
+          args:
+            - "-m"
+            - "/models/Qwen2.5-14B-Instruct-1M-Q4_K_M.gguf"
+            - "--host"
+            - "0.0.0.0"
+            - "--port"
+            - "8081"
+            - "--alias"
+            - "qwen2.5-14b"
+            - "-ngl"
+            - "0"
+            - "-c"
+            - "32768"
+            - "--parallel"
+            - "2"
+            - "--cache-type-k"
+            - "q8_0"
+            - "--cache-type-v"
+            - "q8_0"
+            - "--flash-attn"
+            - "on"
+            - "--jinja"
+          ports:
+            - containerPort: 8081
+          resources:
+            requests: {cpu: "8",  memory: "24Gi"}
+            limits:   {cpu: "16", memory: "40Gi"}
+          volumeMounts:
+            - name: models
+              mountPath: /models
+              readOnly: true
+          readinessProbe:
+            httpGet: {path: /health, port: 8081}
+            initialDelaySeconds: 60
+            periodSeconds: 10
+      volumes:
+        - name: models
+          persistentVolumeClaim:
+            claimName: models-pvc
+---
+# ============================================================================
+# 40. Agent API —— 对应 docs\01 §2.1「开放 API 网关」+ §2.11「可观测层」
+# ============================================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: agent-api
+  namespace: agent-platform
+spec:
+  selector:
+    app: agent-api
+  ports:
+    - port: 8000
+      targetPort: 8000
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agent-api
+  namespace: agent-platform
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: agent-api
+  template:
+    metadata:
+      labels:
+        app: agent-api
+    spec:
+      containers:
+        - name: api
+          image: agent-platform/api:local
+          command: ["uvicorn", "agent_platform.api.app:app", "--host", "0.0.0.0", "--port", "8000"]
+          ports:
+            - containerPort: 8000
+          envFrom:
+            - configMapRef: {name: agent-config}
+            - secretRef: {name: agent-secrets}
+          resources:
+            requests: {cpu: "500m", memory: "2Gi"}
+            limits:   {cpu: "2",   memory: "4Gi"}
+          readinessProbe:
+            httpGet: {path: /health, port: 8000}
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          volumeMounts:
+            - name: data
+              mountPath: /app/data
+      volumes:
+        - name: data
+          emptyDir: {}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: agent-api-hpa
+  namespace: agent-platform
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: agent-api
+  minReplicas: 2
+  maxReplicas: 8
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target: {type: Utilization, averageUtilization: 70}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: agent-api-ingress
+  namespace: agent-platform
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"    # SSE 需要关闭缓冲
+spec:
+  rules:
+    - host: agent.internal.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: agent-api
+                port: {number: 8000}

@@ -1,0 +1,66 @@
+# Agent平台 —— 依赖清单
+#
+# 对应设计文档：
+#   《01_架构方案_RAG_Agent.md》§4 技术选型清单（FastAPI / LangGraph / vLLM兼容 / SQLGlot / PG）
+#   《01_架构方案_RAG_Agent.md》§2.13 工程基座（PostgreSQL 16 / FastAPI）
+#
+# ============================================================================
+# 重要说明（本机环境约束）
+# ============================================================================
+# 本机 Python 为 3.13.9（Windows 11 原生）。部分依赖在 3.13 上**尚未提供预编译 wheel**，
+# 源码编译可能因缺少 C 工具链/头文件而失败，属于已知现象，不代表代码有问题。
+# 典型受影响包：psycopg[binary]、langgraph-checkpoint-postgres（依赖 psycopg）、
+#               部分向量/检索类扩展。
+#
+# 因此本项目代码对所有可选依赖做 **懒加载 / try-import 降级**：
+#   · 缺 langgraph          → orchestration.graph.build_graph 抛出明确中文错误
+#   · 缺 langgraph-checkpoint-postgres → 自动降级为 MemorySaver（内存 checkpoint）
+#   · 缺 psycopg            → 审计自动降级为本地 SQLite，再降级为 JSONL
+#   · 缺 sqlglot            → sql_query 退化为正则保守只读校验
+#   · 缺 pyyaml             → 路由表回退到代码内常量 DEFAULT_ROUTES
+#   · 缺 openai             → LLMClient 抛出明确中文错误
+#   · 缺 fastapi/uvicorn    → api.app 无法启动（接入层是唯一硬依赖）
+#
+# 最小可跑集合（冒烟测试除真实 LLM 外的全部用例）：
+#   fastapi, uvicorn, openai, langgraph, pydantic
+# ============================================================================
+
+# ---- 接入层（§2.1 FastAPI 直出）----
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+pydantic>=2.8.0
+
+# ---- 推理层客户端（OpenAI 兼容接口，§2.9）----
+openai>=1.40.0
+
+# ---- Agent 编排层（§2.4 LangGraph）----
+langgraph>=0.2.30
+# 可选：Postgres checkpoint（DB 不可用时自动降级为 MemorySaver）
+langgraph-checkpoint-postgres>=2.0.0
+
+# ---- 工具层（§2.5 SQLGlot 只读校验）----
+sqlglot>=25.0.0
+
+# ---- 数据层（§2.13 PostgreSQL 16）----
+psycopg[binary]>=3.2.0
+
+# ---- 配置（§2.3 路由表 config/routing.yaml）----
+pyyaml>=6.0.1
+
+# ---- HTTP 客户端（工具层 HTTP API 适配）----
+httpx>=0.27.0
+
+# ---- 桌面版（任务 1：pywebview + WebView2 内核）----
+# 缺失时桌面版会自动降级为「默认浏览器模式」，不会崩溃。
+pywebview>=5.0.0
+
+# ---- 测试 ----
+pytest>=8.0.0
+pytest-asyncio>=0.23.0
+
+# ---- 其它（异步工具/回调）----
+aiohttp>=3.9.0
+
+# ---- 可选：桌面版 exe 打包（deploy\build_desktop.ps1）----
+# 未安装时不影响源码方式运行（python -m agent_platform.desktop）。
+# pyinstaller>=6.0.0

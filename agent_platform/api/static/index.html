@@ -1,0 +1,1126 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Agent平台</title>
+<link rel="icon" href="/ui/favicon.svg" type="image/svg+xml" />
+<link rel="stylesheet" href="/ui/app.css?v=20261123e" />
+<link rel="stylesheet" href="/ui/observability.css?v=20261122a" />
+<link rel="stylesheet" href="/ui/timeline.css?v=20261123a" />
+<script>
+/* 主题预置：在 <body> 渲染之前就把持久化的主题写到 <html> 上，
+   避免"先按默认深色画一帧、再跳到浅色"的闪烁。
+   默认是深色（CSS :root 即深色令牌），所以没有 localStorage 记录时
+   不写任何属性。真正的主题切换逻辑在 app.js 的 initTheme()。 */
+(function () {
+  try {
+    if (localStorage.getItem('agentplat.theme') === 'light') {
+      document.documentElement.setAttribute('data-theme', 'light');
+    }
+  } catch (e) { /* localStorage 不可用时保持默认深色 */ }
+})();
+</script>
+</head>
+<body>
+<div class="ide" id="app">
+
+  <!-- ==================== 标题栏 ==================== -->
+  <header class="titlebar" id="titlebar">
+    <div class="tb-left">
+      <span class="tb-logo" aria-hidden="true">
+        <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor"
+             stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M6 2.5 1.8 8 6 13.5" />
+          <path d="M10 2.5 14.2 8 10 13.5" />
+        </svg>
+      </span>
+      <span class="tb-title">Agent平台</span>
+      <nav class="tb-menu" aria-label="主菜单">
+        <button type="button" class="tb-menu-item" data-menu="file"
+                aria-haspopup="true" aria-expanded="false">文件</button>
+        <button type="button" class="tb-menu-item" data-menu="edit"
+                aria-haspopup="true" aria-expanded="false">编辑</button>
+        <button type="button" class="tb-menu-item" data-menu="view"
+                aria-haspopup="true" aria-expanded="false">视图</button>
+      </nav>
+    </div>
+    <div class="tb-right">
+      <!-- ★ 桌面版「一键启动」：常驻在标题栏，任何视图下都能一键把平台拉起来。
+           为什么放标题栏而不是侧栏：侧栏面板会被折叠/切换视图藏起来，
+           而「一键启动」是**全局入口**，必须在任何视图下都一眼可见。 -->
+      <button type="button" class="tb-launch-btn" id="btn-launch"
+              title="一键启动：选择要运行的模型并把平台拉起来"
+              aria-haspopup="true" aria-expanded="false">
+        <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor"
+             stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M5.4 3.1 12.6 8 5.4 12.9z" />
+        </svg>
+        <span id="tb-launch-label">一键启动</span>
+        <span class="tb-launch-dot" id="tb-launch-spin" hidden aria-hidden="true"></span>
+      </button>
+      <button type="button" class="tb-icon-btn" id="btn-theme" title="切换主题（浅色 / 深色）" aria-label="切换主题">
+        <!-- 太阳：浅色主题下显示；月亮：深色主题下显示（由 CSS 切换可见性） -->
+        <svg class="tb-theme-icon tb-theme-sun" viewBox="0 0 16 16" width="15" height="15" fill="none"
+             stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <circle cx="8" cy="8" r="3.1" />
+          <path d="M8 1.5v1.4M8 13.1v1.4M14.5 8h-1.4M2.9 8H1.5M12.6 3.4l-1 1M4.4 11.6l-1 1M12.6 12.6l-1-1M4.4 4.4l-1-1" />
+        </svg>
+        <svg class="tb-theme-icon tb-theme-moon" viewBox="0 0 16 16" width="15" height="15" fill="none"
+             stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M13.4 9.6A5.9 5.9 0 0 1 6.4 2.6a5.9 5.9 0 1 0 7 7z" />
+        </svg>
+      </button>
+      <button type="button" class="tb-icon-btn" id="btn-new" title="新建会话 (Ctrl+N)" aria-label="新建会话">
+        <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor"
+             stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M8 3.2v9.6M3.2 8h9.6" />
+        </svg>
+      </button>
+      <span class="tb-status" id="tb-status" title="系统状态">
+        <span class="status-dot" id="tb-dot"></span>
+        <span id="tb-status-text">连接中…</span>
+      </span>
+    </div>
+  </header>
+
+  <!-- ==================== 主体：活动栏 + 侧栏 + 主区 ==================== -->
+  <div class="workbench">
+
+    <!-- ---------- 活动栏 ---------- -->
+    <nav class="activitybar" id="activitybar" aria-label="活动栏">
+      <button type="button" class="act-item active" data-view="explorer" title="资源管理器" aria-label="资源管理器">
+        <svg viewBox="0 0 16 16" width="20" height="20" fill="none" stroke="currentColor"
+         stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M4 2.6h4.6L10.2 4.2h3.4a1.2 1.2 0 0 1 1.2 1.2v6.4a1.2 1.2 0 0 1-1.2 1.2H4a1.2 1.2 0 0 1-1.2-1.2V3.8A1.2 1.2 0 0 1 4 2.6z"/>
+    </svg>
+      </button>
+      <button type="button" class="act-item" data-view="knowledge" title="知识库" aria-label="知识库">
+        <svg viewBox="0 0 16 16" width="20" height="20" fill="none" stroke="currentColor"
+         stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M2.6 3.6A1.2 1.2 0 0 1 3.8 2.4h2.9A2.5 2.5 0 0 1 8 4.6v8.8a2.1 2.1 0 0 0-1.6-1H3.8a1.2 1.2 0 0 1-1.2-1.2z"/>
+      <path d="M13.4 3.6a1.2 1.2 0 0 0-1.2-1.2H9.3A2.5 2.5 0 0 0 8 4.6v8.8a2.1 2.1 0 0 1 1.6-1h2.6a1.2 1.2 0 0 0 1.2-1.2z"/>
+    </svg>
+      </button>
+      <button type="button" class="act-item" data-view="tools" title="工具" aria-label="工具">
+        <svg viewBox="0 0 16 16" width="20" height="20" fill="none" stroke="currentColor"
+         stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M14.1 6.3a3.8 3.8 0 0 1-4.8 4.8l-4.6 4.6a1.9 1.9 0 0 1-2.7-2.7l4.6-4.6a3.8 3.8 0 0 1 4.8-4.8L9.3 5.7l1.1 1.1z"/>
+    </svg>
+      </button>
+      <button type="button" class="act-item" data-view="tasks" title="任务" aria-label="任务">
+        <svg viewBox="0 0 16 16" width="20" height="20" fill="none" stroke="currentColor"
+         stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M10.4 4.2h3.2M10.4 8h3.2M10.4 11.8h3.2"/>
+      <path d="M2.6 4.2 3.6 5.2 5.4 3.4"/><path d="M2.6 8 3.6 9 5.4 7.2"/>
+      <path d="M2.6 11.8 3.6 12.8 5.4 11"/>
+    </svg>
+      </button>
+      <button type="button" class="act-item" data-view="sessions" title="历史会话" aria-label="历史会话">
+        <svg viewBox="0 0 16 16" width="20" height="20" fill="none" stroke="currentColor"
+         stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M2.8 8a5.2 5.2 0 1 1 1.6 3.7"/>
+      <path d="M2.6 14.6v-4.4h4.4"/><path d="M8 5.2V8l2.2 1.3"/>
+    </svg>
+      </button>
+      <button type="button" class="act-item" data-view="workspace" title="工作区" aria-label="工作区">
+        <svg viewBox="0 0 16 16" width="20" height="20" fill="none" stroke="currentColor"
+         stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M2.4 12.6V4.4a1 1 0 0 1 1-1h2.3L7.2 4.6h5.4a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1H3.4a1 1 0 0 1-1-1z"/>
+      <path d="M6.7 7.5 5.5 8.9l1.2 1.4M9.3 7.5l1.2 1.4-1.2 1.4"/>
+    </svg>
+      </button>
+      <button type="button" class="act-item" data-view="settings" title="设置与状态" aria-label="设置与状态">
+        <svg viewBox="0 0 16 16" width="20" height="20" fill="none" stroke="currentColor"
+         stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="8" cy="8" r="2.2"/>
+      <path d="M12.9 10.2a1.1 1.1 0 0 0 .2 1.2l.1.1a1.3 1.3 0 1 1-1.8 1.8l-.1-.1a1.1 1.1 0 0 0-1.2-.2 1.1 1.1 0 0 0-.7 1v.2a1.3 1.3 0 1 1-2.6 0v-.1a1.1 1.1 0 0 0-.7-1 1.1 1.1 0 0 0-1.2.2l-.1.1a1.3 1.3 0 1 1-1.8-1.8l.1-.1a1.1 1.1 0 0 0 .2-1.2 1.1 1.1 0 0 0-1-.7h-.2a1.3 1.3 0 1 1 0-2.6h.1a1.1 1.1 0 0 0 1-.7 1.1 1.1 0 0 0-.2-1.2l-.1-.1a1.3 1.3 0 1 1 1.8-1.8l.1.1a1.1 1.1 0 0 0 1.2.2h.1a1.1 1.1 0 0 0 .7-1v-.2a1.3 1.3 0 1 1 2.6 0v.1a1.1 1.1 0 0 0 .7 1 1.1 1.1 0 0 0 1.2-.2l.1-.1a1.3 1.3 0 1 1 1.8 1.8l-.1.1a1.1 1.1 0 0 0-.2 1.2v.1a1.1 1.1 0 0 0 1 .7h.2a1.3 1.3 0 1 1 0 2.6h-.1a1.1 1.1 0 0 0-1 .7z"/>
+    </svg>
+      </button>
+      <div class="act-spacer"></div>
+      <span class="desktop-badge" id="desktop-badge" hidden>桌面</span>
+    </nav>
+
+    <!-- ---------- 侧栏（视图容器） ---------- -->
+    <aside class="sidebar" id="sidebar" aria-label="侧栏">
+      <div class="sidebar-resizer" id="rs-left" role="separator" aria-orientation="vertical"
+           tabindex="0" title="拖拽调整侧栏宽度（双击复位）"></div>
+
+      <!-- 视图：资源管理器（系统状态 + 快捷入口） -->
+      <section class="view" id="view-explorer">
+        <header class="view-head">
+          <span class="view-title">资源管理器</span>
+          <div class="view-actions">
+            <button type="button" class="icon-btn" id="btn-refresh-health" title="刷新状态" aria-label="刷新状态">
+              <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor"
+                   stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M13.3 8a5.3 5.3 0 1 1-1.6-3.8" /><path d="M13.4 2.6v2.6h-2.6" />
+              </svg>
+            </button>
+          </div>
+        </header>
+        <div class="view-body">
+          <div class="view-sub">本地推理 · 可自定义知识库</div>
+          <div class="side-filter">
+            <svg class="side-filter-ico" viewBox="0 0 16 16" width="13" height="13" fill="none"
+                 stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"
+                 aria-hidden="true">
+              <circle cx="7.2" cy="7.2" r="4.4" /><path d="M10.5 10.5 13.4 13.4" />
+            </svg>
+            <input id="explorer-filter" class="side-filter-input" type="text" placeholder="筛选条目…" aria-label="筛选条目" />
+          </div>
+          <div class="tree" id="explorer-tree">
+            <div class="tree-node folder open" id="grp-health">
+              <button type="button" class="tree-row tree-toggle">
+                <svg class="tw" viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor"
+                     stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M6 4l4 4-4 4" />
+                </svg>
+                <svg class="ti" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor"
+                     stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M2.4 8h2.4l1.6-3.8L9 12.2l1.7-4.2h2.9" />
+                </svg>
+                <span class="tree-label">系统状态</span>
+              </button>
+              <div class="tree-children">
+                <div class="tree-row leaf"><span class="tree-label dim">LLM</span><span class="pill pill-wait" id="h-llm">检测中…</span></div>
+                <div class="tree-row leaf"><span class="tree-label dim">工具数量</span><span class="tree-val" id="h-toolcount">–</span></div>
+                <div class="tree-row leaf"><span class="tree-label dim">HITL 工具</span><span class="tree-val" id="h-hitl">–</span></div>
+                <div class="tree-row leaf"><span class="tree-label dim">Checkpointer</span><span class="tree-val" id="h-cp">–</span></div>
+                <div class="tree-row leaf"><span class="tree-label dim">Prompt 版本</span><span class="tree-val" id="h-pv">–</span></div>
+                <div class="tree-row leaf"><span class="tree-label dim">会话 / 任务</span><span class="tree-val" id="h-st">–</span></div>
+              </div>
+            </div>
+
+            <div class="tree-node folder open" id="grp-endpoints">
+              <button type="button" class="tree-row tree-toggle">
+                <svg class="tw" viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor"
+                     stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M6 4l4 4-4 4" />
+                </svg>
+                <svg class="ti" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor"
+                     stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                  <ellipse cx="8" cy="4" rx="5.4" ry="2" />
+                  <path d="M2.6 4v8c0 1.1 2.4 2 5.4 2s5.4-.9 5.4-2V4" />
+                  <path d="M2.6 8c0 1.1 2.4 2 5.4 2s5.4-.9 5.4-2" />
+                  <path d="M7 7.5h.01M7 16.5h.01" />
+                </svg>
+                <span class="tree-label">模型端点</span>
+                <span class="tree-badge" id="ep-sum">检测中…</span>
+              </button>
+              <div class="tree-children">
+                <div id="h-endpoints" class="ep-list"><div class="muted">检测中…</div></div>
+              </div>
+            </div>
+
+            <div class="tree-node folder open" id="grp-quick">
+              <button type="button" class="tree-row tree-toggle">
+                <svg class="tw" viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor"
+                     stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M6 4l4 4-4 4" />
+                </svg>
+                <svg class="ti" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor"
+                     stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M8.7 1.5 3 8.6h3.5L6.8 14.5l5.3-7.1H8.6z" />
+                </svg>
+                <span class="tree-label">快捷操作</span>
+              </button>
+              <div class="tree-children">
+                <button type="button" class="tree-row leaf act" id="btn-custom-tool">
+                  <svg class="ti" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor"
+                       stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M8 3.2v9.6M3.2 8h9.6" />
+                  </svg>
+                  <span class="tree-label">自定义工具</span>
+                </button>
+                <button type="button" class="tree-row leaf act" id="btn-kb-import">
+                  <svg class="ti" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor"
+                       stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M8 10.4V2.2" /><path d="M5 5.2 8 2.2l3 3" />
+                    <path d="M2.6 10v2.4a1.2 1.2 0 0 0 1.2 1.2h8.4a1.2 1.2 0 0 0 1.2-1.2V10" />
+                  </svg>
+                  <span class="tree-label">导入文档</span>
+                </button>
+                <button type="button" class="tree-row leaf act" id="btn-kb-reindex-all">
+                  <svg class="ti" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor"
+                       stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M13.3 8a5.3 5.3 0 1 1-1.6-3.8" /><path d="M13.4 2.6v2.6h-2.6" />
+                  </svg>
+                  <span class="tree-label">全量重建索引</span>
+                </button>
+              </div>
+            </div>
+          </div>
+          <div id="kb-msg" class="view-msg muted sm"></div>
+        </div>
+      </section>
+
+      <!-- 视图：知识库 -->
+      <section class="view" id="view-knowledge" hidden>
+        <header class="view-head">
+          <span class="view-title">知识库</span>
+          <div class="view-actions">
+            <button type="button" class="icon-btn" id="btn-kb-refresh" title="刷新" aria-label="刷新知识库列表">
+              <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor"
+                   stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M13.3 8a5.3 5.3 0 1 1-1.6-3.8" /><path d="M13.4 2.6v2.6h-2.6" />
+              </svg>
+            </button>
+            <button type="button" class="icon-btn" id="btn-kb-import-2" title="导入文档" aria-label="导入文档">
+              <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor"
+                   stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M8 3.2v9.6M3.2 8h9.6" />
+              </svg>
+            </button>
+          </div>
+        </header>
+        <div class="view-body">
+          <div class="view-sub" id="kb-summary">加载中…</div>
+          <div class="side-filter">
+            <svg class="side-filter-ico" viewBox="0 0 16 16" width="13" height="13" fill="none"
+                 stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"
+                 aria-hidden="true">
+              <circle cx="7.2" cy="7.2" r="4.4" /><path d="M10.5 10.5 13.4 13.4" />
+            </svg>
+            <input id="kb-filter" class="side-filter-input" type="text" placeholder="筛选文档…" aria-label="筛选文档" />
+          </div>
+          <div id="kb-doc-list" class="tree doc-tree"><div class="muted">加载中…</div></div>
+        </div>
+      </section>
+
+      <!-- 视图：工具 -->
+      <section class="view" id="view-tools" hidden>
+        <header class="view-head">
+          <span class="view-title">工具</span>
+          <div class="view-actions">
+            <button type="button" class="icon-btn" id="btn-tools-refresh" title="刷新" aria-label="刷新工具列表">
+              <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor"
+                   stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M13.3 8a5.3 5.3 0 1 1-1.6-3.8" /><path d="M13.4 2.6v2.6h-2.6" />
+              </svg>
+            </button>
+            <button type="button" class="icon-btn" id="btn-custom-tool-2" title="新建自定义工具" aria-label="新建自定义工具">
+              <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor"
+                   stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M8 3.2v9.6M3.2 8h9.6" />
+              </svg>
+            </button>
+          </div>
+        </header>
+        <div class="view-body">
+          <div class="view-sub" id="t-count">加载中…</div>
+          <div class="side-filter">
+            <svg class="side-filter-ico" viewBox="0 0 16 16" width="13" height="13" fill="none"
+                 stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"
+                 aria-hidden="true">
+              <circle cx="7.2" cy="7.2" r="4.4" /><path d="M10.5 10.5 13.4 13.4" />
+            </svg>
+            <input id="tools-filter" class="side-filter-input" type="text" placeholder="筛选工具…" aria-label="筛选工具" />
+          </div>
+          <div id="tools-list" class="tree tool-tree"><div class="muted">加载中…</div></div>
+          <div class="view-foot">
+            <button id="btn-tools-more" class="link-btn wide" type="button">展开全部</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- 视图：任务 -->
+      <section class="view" id="view-tasks" hidden>
+        <header class="view-head">
+          <span class="view-title">任务</span>
+          <div class="view-actions">
+            <button type="button" class="icon-btn" id="btn-tasks-refresh" title="刷新" aria-label="刷新任务列表">
+              <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor"
+                   stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M13.3 8a5.3 5.3 0 1 1-1.6-3.8" /><path d="M13.4 2.6v2.6h-2.6" />
+              </svg>
+            </button>
+          </div>
+        </header>
+        <div class="view-body">
+          <div class="filter-bar">
+            <label class="field inline">
+              <span>状态</span>
+              <select id="task-status-filter" class="input sm">
+                <option value="">全部</option>
+                <option value="queued">queued</option>
+                <option value="running">running</option>
+                <option value="done">done</option>
+                <option value="failed">failed</option>
+              </select>
+            </label>
+            <label class="field inline">
+              <span>排序</span>
+              <select id="task-sort" class="input sm">
+                <option value="new">新→旧</option>
+                <option value="old">旧→新</option>
+              </select>
+            </label>
+          </div>
+          <div class="view-sub" id="task-count">加载中…</div>
+          <div id="tasks-list" class="tree task-tree"><div class="muted">暂无任务</div></div>
+          <div class="view-foot">
+            <button id="btn-tasks-more" class="link-btn wide" type="button">查看全部</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- 视图：历史会话 -->
+      <section class="view" id="view-sessions" hidden>
+        <header class="view-head">
+          <span class="view-title">历史会话</span>
+          <div class="view-actions">
+            <button type="button" class="icon-btn" id="btn-sessions-refresh" title="刷新" aria-label="刷新会话列表">
+              <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor"
+                   stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M13.3 8a5.3 5.3 0 1 1-1.6-3.8" /><path d="M13.4 2.6v2.6h-2.6" />
+              </svg>
+            </button>
+          </div>
+        </header>
+        <div class="view-body">
+          <div class="view-sub" id="sess-summary">加载中…</div>
+          <div class="side-filter">
+            <svg class="side-filter-ico" viewBox="0 0 16 16" width="13" height="13" fill="none"
+                 stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"
+                 aria-hidden="true">
+              <circle cx="7.2" cy="7.2" r="4.4" /><path d="M10.5 10.5 13.4 13.4" />
+            </svg>
+            <input id="sessions-filter" class="side-filter-input" type="text" placeholder="筛选会话…" aria-label="筛选会话" />
+          </div>
+          <div id="sessions-list" class="tree sess-tree"><div class="muted">加载中…</div></div>
+          <div class="view-foot">
+            <button id="btn-sessions-more" class="link-btn wide" type="button">加载更多</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- 视图：工作区（代码浏览 + 受控编辑） -->
+      <section class="view" id="view-workspace" hidden>
+        <header class="view-head">
+          <span class="view-title">工作区</span>
+          <div class="view-actions">
+            <button type="button" class="icon-btn" id="btn-ws-new" title="新建文件" aria-label="新建文件">
+              <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor"
+                   stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3.5 2.6h5.7L12 5.4v8a1.2 1.2 0 0 1-1.2 1.2H3.5a1.2 1.2 0 0 1-1.2-1.2V3.8a1.2 1.2 0 0 1 1.2-1.2z"/>
+                <path d="M9.1 2.7v2.8h2.8"/><path d="M8 8v3.4M6.3 9.7h3.4"/>
+              </svg>
+            </button>
+            <button type="button" class="icon-btn" id="btn-ws-refresh" title="刷新文件树" aria-label="刷新文件树">
+              <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor"
+                   stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M13.3 8a5.3 5.3 0 1 1-1.6-3.8" /><path d="M13.4 2.6v2.6h-2.6" />
+              </svg>
+            </button>
+            <button type="button" class="icon-btn" id="btn-ws-search-toggle" title="在工作区中搜索" aria-label="在工作区中搜索">
+              <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor"
+                   stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="7.2" cy="7.2" r="4.4" /><path d="M10.5 10.5 13.4 13.4" />
+              </svg>
+            </button>
+          </div>
+        </header>
+        <div class="view-body">
+          <div class="ws-search-box" id="ws-search-box" hidden>
+            <input id="ws-search-input" class="input" type="text" placeholder="搜索代码…（回车执行）" />
+            <div id="ws-search-meta" class="muted sm"></div>
+            <div id="ws-search-results" class="ws-search-results"></div>
+          </div>
+          <div class="ws-root-line" id="ws-root-line" title="工作区根目录">加载中…</div>
+          <div class="side-filter">
+            <svg class="side-filter-ico" viewBox="0 0 16 16" width="13" height="13" fill="none"
+                 stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"
+                 aria-hidden="true">
+              <circle cx="7.2" cy="7.2" r="4.4" /><path d="M10.5 10.5 13.4 13.4" />
+            </svg>
+            <input id="ws-filter" class="side-filter-input" type="text" placeholder="筛选文件…" aria-label="筛选文件" />
+          </div>
+          <div class="tree ws-tree" id="ws-tree"></div>
+          <div id="ws-msg" class="view-msg muted sm"></div>
+        </div>
+      </section>
+
+      <!-- 视图：设置与状态 -->
+      <section class="view" id="view-settings" hidden>
+        <header class="view-head">
+          <span class="view-title">设置与状态</span>
+          <div class="view-actions">
+            <button type="button" class="icon-btn" id="btn-settings-refresh" title="刷新" aria-label="刷新运行状态">
+              <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor"
+                   stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M13.3 8a5.3 5.3 0 1 1-1.6-3.8" /><path d="M13.4 2.6v2.6h-2.6" />
+              </svg>
+            </button>
+          </div>
+        </header>
+        <div class="view-body">
+          <div class="tree">
+            <div class="tree-node folder open">
+              <button type="button" class="tree-row tree-toggle">
+                <svg class="tw" viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor"
+                     stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 4l4 4-4 4" /></svg>
+                <svg class="ti" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor"
+                     stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M2.4 8h2.4l1.6-3.8L9 12.2l1.7-4.2h2.9" />
+                </svg>
+                <span class="tree-label">系统状态</span>
+              </button>
+              <div class="tree-children">
+                <div class="tree-row leaf"><span class="tree-label dim">LLM</span><span class="pill pill-wait" id="s-llm">检测中…</span></div>
+                <div class="tree-row leaf"><span class="tree-label dim">工具数量</span><span class="tree-val" id="s-toolcount">–</span></div>
+                <div class="tree-row leaf"><span class="tree-label dim">HITL 工具</span><span class="tree-val" id="s-hitl">–</span></div>
+                <div class="tree-row leaf"><span class="tree-label dim">Checkpointer</span><span class="tree-val" id="s-cp">–</span></div>
+                <div class="tree-row leaf"><span class="tree-label dim">Prompt 版本</span><span class="tree-val" id="s-pv">–</span></div>
+                <div class="tree-row leaf"><span class="tree-label dim">会话 / 任务</span><span class="tree-val" id="s-st">–</span></div>
+              </div>
+            </div>
+            <div class="tree-node folder open">
+              <button type="button" class="tree-row tree-toggle">
+                <svg class="tw" viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor"
+                     stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 4l4 4-4 4" /></svg>
+                <svg class="ti" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor"
+                     stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M3 13.4V9.2M6.4 13.4V4.4M9.8 13.4V6.6M13.2 13.4V2.6" />
+                  <path d="M2 13.4h12" />
+                </svg>
+                <span class="tree-label">运行统计</span>
+              </button>
+              <div class="tree-children">
+                <div id="metrics-list" class="tree-children"><div class="muted sm">加载中…</div></div>
+              </div>
+            </div>
+            <div class="tree-node folder open">
+              <button type="button" class="tree-row tree-toggle">
+                <svg class="tw" viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor"
+                     stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 4l4 4-4 4" /></svg>
+                <svg class="ti" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor"
+                     stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="3.2" y="3" width="9.6" height="10" rx="1.2" />
+                  <path d="M5.6 6.5h4.8M5.6 9.5h3.4" />
+                </svg>
+                <span class="tree-label">模型端点</span>
+                <span class="tree-badge" id="ep-sum-2">检测中…</span>
+              </button>
+              <div class="tree-children">
+                <div id="h-endpoints-2" class="ep-list"><div class="muted">检测中…</div></div>
+              </div>
+            </div>
+
+            <!-- 模型服务：本地模型端点的启停开关（/models/lifecycle） -->
+            <div class="tree-node folder open" id="grp-msvc">
+              <button type="button" class="tree-row tree-toggle">
+                <svg class="tw" viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor"
+                     stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 4l4 4-4 4" /></svg>
+                <svg class="ti" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor"
+                     stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="8" cy="8" r="2.2" />
+                  <path d="M8 1.6v2.2M8 12.2v2.2M1.6 8h2.2M12.2 8h2.2" />
+                </svg>
+                <span class="tree-label">模型服务</span>
+                <span class="tree-badge" id="msvc-sum">–</span>
+              </button>
+              <div class="tree-children">
+                <!-- 头部操作：全部启动 / 全部停止 -->
+                <div class="msvc-actions">
+                  <button type="button" class="btn btn-ghost sm" id="btn-msvc-start-all" title="启动全部模型端点">全部启动</button>
+                  <button type="button" class="btn btn-ghost sm" id="btn-msvc-stop-all" title="停止全部模型端点">全部停止</button>
+                </div>
+                <div id="msvc-list" class="msvc-list"><div class="muted sm">加载中…</div></div>
+                <div id="msvc-msg" class="msvc-msg muted sm"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </aside>
+
+    <!-- ---------- 主区域 ---------- -->
+    <main class="main" id="main">
+      <!-- 标签页栏 -->
+      <div class="tabbar" id="tabbar" role="tablist" aria-label="编辑器标签页">
+        <div class="tabs" id="tabs"></div>
+      </div>
+
+      <!-- 内容舞台（各 tab 的页面） -->
+      <div class="stage" id="stage">
+        <!-- Chat 页面（data-page 必须与 tab id 一致：pg-chat，
+             否则 activateTab('pg-chat') 找不到对应 .page，会把对话页隐藏） -->
+        <section class="page page-chat active" id="page-chat" data-page="pg-chat">
+          <div class="chat-head">
+            <span class="chat-title" id="chat-title">对话</span>
+            <span class="chat-thread mono" id="m-thread">（新建）</span>
+            <span class="mode-badge" id="chat-mode-badge" data-mode="agent" title="当前交互模式">Agent</span>
+            <span class="grow"></span>
+            <button type="button" class="head-btn" id="btn-summarize"
+                    title="用本地模型生成会话结构化摘要" aria-label="生成会话摘要">
+              <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor"
+                   stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3.5 2.5h6.2L12.5 5.3v8.2h-9z"/>
+                <path d="M9.5 2.6v3h3"/>
+                <path d="M5.6 8.4h4.8M5.6 11h3.2"/>
+              </svg>
+              <span>摘要</span>
+            </button>
+            <span class="pill pill-wait" id="m-status">空闲</span>
+          </div>
+          <div id="chat" class="chat" aria-live="polite">
+            <!-- 空状态（welcome）：**静态兜底**。
+                 真正的**唯一事实来源**是 app.js 里的 WELCOME_HTML 常量
+                 （2026-11-24 修复「新建对话后看不到内容」：
+                  此前这段 markup 只存在于本静态骨架里，JS 从不重建它
+                  → 「新建会话」把 #chat 清空后就**永远回不来**，
+                    屏幕上只剩一行 12px 灰色提示，看起来就是「一片空白」）。
+                 boot() 会用 renderWelcome() 用 JS 常量覆盖本块；
+                 保留它只是为了让 JS 尚未加载时页面也不至于完全空白。 -->
+            <div class="welcome">
+              <svg viewBox="0 0 16 16" width="30" height="30" fill="none" stroke="currentColor"
+                   stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M7.4 1.6 8.4 4.7l3.1 1-3.1 1-1 3.1-1-3.1-3.1-1 3.1-1z" />
+                <path d="M12.2 8.8l.6 1.9 1.9.6-1.9.6-.6 1.9-.6-1.9-1.9-.6 1.9-.6z" />
+              </svg>
+              <h3>Agent 对话</h3>
+              <p>输入问题 → Agent 调用知识库 / 工具检索 → 返回带引用 chip 的答案。<br />
+                 涉及写操作（report_render / notify）会弹出人工确认卡片。</p>
+              <p class="muted">试试：「T101_VDD_FUNCT 的上下限是多少？请引用来源。」</p>
+            </div>
+          </div>
+          <!-- 运行状态行：位于消息流**末端**（设计文档 E.3），
+               双通道：具体状态文字 + 三点波浪动态指示器。
+               空闲时隐藏；SSE 事件推进时由 app.js 更新文案。 -->
+          <div class="run-status" id="run-status" hidden role="status" aria-live="polite">
+            <span class="run-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+            <span class="run-text" id="run-text">思考中…</span>
+          </div>
+        </section>
+      </div>
+
+      <!-- 任务发布台面板（主区域底部抽屉） -->
+      <div class="panel-drawer" id="task-drawer" hidden>
+        <div class="drawer-head">
+          <span class="drawer-title">任务发布台</span>
+          <span class="muted sm">预置 prompt + 参数 → 后台异步执行</span>
+          <span class="grow"></span>
+          <button type="button" class="icon-btn" id="btn-task-drawer-close" title="收起" aria-label="收起任务发布台">
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor"
+                 stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6l4 4 4-4" /></svg>
+          </button>
+        </div>
+        <div class="drawer-body">
+          <div class="drawer-col">
+            <h4 class="sec-title">预置任务模板</h4>
+            <label class="field"><span>模板</span>
+              <select id="tpl-select" class="input"><option value="">加载中…</option></select>
+            </label>
+            <div class="row">
+              <button id="btn-tpl-use" class="btn btn-ghost sm" type="button">填入输入框</button>
+              <button id="btn-tpl-fill" class="btn btn-ghost sm" type="button">填入并发布</button>
+            </div>
+            <div id="tpl-detail" class="muted sm"></div>
+          </div>
+          <div class="drawer-col">
+            <h4 class="sec-title">发布任务</h4>
+            <label class="field"><span>任务名</span>
+              <input id="task-name" class="input" placeholder="如：L1-002 限值核对" /></label>
+            <label class="field"><span>任务描述 / Prompt</span>
+              <textarea id="task-desc" class="input" rows="2" placeholder="要交给 Agent 的问题（Enter 直接发布）"></textarea></label>
+            <label class="field"><span>目标模型</span>
+              <select id="task-model" class="input">
+                <option value="gpt-oss-20b">gpt-oss-20b</option>
+              </select>
+            </label>
+            <label class="field"><span>交互模式</span>
+              <select id="task-mode" class="input">
+                <option value="agent">Agent（完整 ReAct）</option>
+                <option value="ask">Ask（只读问答）</option>
+                <option value="plan">Plan（只规划）</option>
+              </select>
+            </label>
+            <div class="row">
+              <label class="field"><span>max_rounds</span>
+                <input id="p-rounds" class="input" type="number" value="20" min="1" max="64" /></label>
+              <label class="field"><span>温度</span>
+                <input id="p-temp" class="input" type="number" value="0.2" step="0.1" min="0" max="2" /></label>
+            </div>
+            <div class="row">
+              <label class="field"><span>reasoning_effort</span>
+                <select id="p-effort" class="input">
+                  <option value="low">low</option>
+                  <option value="medium" selected>medium</option>
+                  <option value="high">high</option>
+                </select>
+              </label>
+              <label class="field"><span>max_tokens</span>
+                <input id="p-maxtok" class="input" type="number" value="2048" min="256" step="256" /></label>
+            </div>
+            <button id="btn-publish" class="btn btn-primary" type="button">发布任务</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 输入区（composer） -->
+      <form id="composer" class="composer" autocomplete="off">
+        <div class="composer-inner">
+          <textarea id="input" rows="1" placeholder="输入问题…  Enter 发送 · Shift+Enter 换行"></textarea>
+          <div class="composer-bar">
+            <button type="button" class="chip-btn mode-chip" id="btn-mode"
+                    data-mode="agent" title="交互模式（Agent / Ask / Plan）"
+                    aria-haspopup="true" aria-expanded="false">
+              <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor"
+                   stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="8" cy="8" r="5.6" /><path d="M8 4.8v3.4l2.2 1.3" />
+              </svg>
+              <span id="mode-label">Agent</span>
+            </button>
+            <button type="button" class="chip-btn" id="btn-model" title="选择模型"
+                    aria-haspopup="true" aria-expanded="false">
+              <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor"
+                   stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="8" cy="8" r="2.2" /><path d="M8 1.6v2.2M8 12.2v2.2M1.6 8h2.2M12.2 8h2.2" />
+              </svg>
+              <span id="model-label">加载中…</span>
+            </button>
+            <select id="model-select" class="model-select" title="目标模型"
+                    aria-hidden="true" tabindex="-1">
+              <option value="gpt-oss-20b">gpt-oss-20b (GPU :8080)</option>
+              <option value="qwen2.5-14b">qwen2.5-14b (CPU :8081)</option>
+            </select>
+            <!-- 一键启动：勾选要用的模型 → 一次点击「启动选中 / 停止全部」 -->
+            <button type="button" class="chip-btn" id="btn-msvc-launch"
+                    title="一键启动所选模型（未勾选的将被停止）"
+                    aria-haspopup="true" aria-expanded="false">
+              <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor"
+                   stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M5 3.2 12.4 8 5 12.8z" />
+              </svg>
+              <span id="msvc-launch-label">一键启动</span>
+            </button>
+            <button type="button" class="chip-btn" id="btn-tasks-toggle" title="任务发布台">
+              <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor"
+                   stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="2.5" y="3" width="11" height="10" rx="1.5" /><path d="M5 6.5h6M5 9.5h4" />
+              </svg>
+              <span>任务</span>
+            </button>
+            <!-- ReAct 轮次上限（2026-11-24 新增）
+                 此前「max_rounds」只出现在「任务发布台」里，**对话**流程完全用不到
+                 （服务端硬编码 8 轮）→ 用户抱怨「才几步就停了」。
+                 这里把它提到输入区，对话与任务共用同一个值。 -->
+            <label class="chip-btn chip-rounds" for="chat-rounds"
+                   title="本次对话的 ReAct 轮次上限（一次 LLM 调用 = 一轮）">
+              <span class="chip-rounds-label">轮次</span>
+              <input id="chat-rounds" class="chip-rounds-input" type="number"
+                     value="20" min="1" max="64" step="1"
+                     aria-label="ReAct 轮次上限" />
+            </label>
+            <span class="grow"></span>
+            <!-- 上下文占用：常驻百分比，hover 展开明细（设计文档 E.8） -->
+            <span class="ctx-meter" id="ctx-meter" hidden
+                  tabindex="0" role="status" aria-live="polite"
+                  title="上下文占用（悬停查看明细）">
+              <span class="ctx-bar" id="ctx-bar"><i id="ctx-bar-fill"></i></span>
+              <span class="ctx-pct mono" id="ctx-pct">0%</span>
+              <span class="ctx-detail ctx-popover" id="ctx-detail" role="tooltip"></span>
+            </span>
+            <span id="stream-state" class="stream-state muted"></span>
+            <button type="submit" id="btn-send" class="send-btn" title="发送 (Ctrl+Enter)" aria-label="发送">
+              <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor"
+                   stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M2.6 8h10.2M8.6 3.6 13 8l-4.4 4.4" />
+              </svg>
+            </button>
+          </div>
+        </div>
+      </form>
+    </main>
+  </div>
+</div>
+
+<!-- ============ 窄屏单栏切换条 ============ -->
+<nav class="mobile-bar" id="mobile-bar" hidden>
+  <button class="mbtn active" data-panel="main" type="button">对话</button>
+  <button class="mbtn" data-panel="side" type="button">侧栏</button>
+</nav>
+
+<!-- ============ 知识库导入模态框 ============ -->
+<div id="kb-mask" class="modal-mask" hidden>
+  <div class="modal modal-kb" role="dialog" aria-modal="true" aria-labelledby="kb-title">
+    <header class="modal-head">
+      <h3 id="kb-title">导入文档到知识库</h3>
+      <button id="kb-close" class="modal-x" type="button" title="关闭" aria-label="关闭">
+        <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor"
+             stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4l8 8M12 4l-8 8" /></svg>
+      </button>
+    </header>
+    <div class="modal-body">
+      <div class="tabs modal-tabs" role="tablist">
+        <button id="kb-tab-upload" class="tab active" type="button" role="tab">上传文件</button>
+        <button id="kb-tab-text" class="tab" type="button" role="tab">粘贴文本</button>
+      </div>
+
+      <div id="kb-pane-upload" class="kb-pane">
+        <div id="kb-dropzone" class="dropzone" tabindex="0">
+          <svg class="dz-icon" viewBox="0 0 16 16" width="24" height="24" fill="none" stroke="currentColor"
+               stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M8 10.4V2.2" /><path d="M5 5.2 8 2.2l3 3" />
+            <path d="M2.6 10v2.4a1.2 1.2 0 0 0 1.2 1.2h8.4a1.2 1.2 0 0 0 1.2-1.2V10" />
+          </svg>
+          <div class="dz-title">把文件拖到这里，或<span class="link">点击选择</span></div>
+          <div class="muted sm">支持 .md / .txt / .pdf / .docx，单个文件 ≤ 20MB</div>
+          <input id="kb-file" type="file" accept=".md,.markdown,.txt,.pdf,.docx" hidden />
+        </div>
+        <div id="kb-file-info" class="muted sm"></div>
+      </div>
+
+      <div id="kb-pane-text" class="kb-pane" hidden>
+        <label class="field"><span>文档正文 <b class="req">*</b>
+          <small class="muted">（支持 <code>---</code> 包裹的 YAML front matter）</small></span>
+          <textarea id="kb-text" class="input mono" rows="8" placeholder="在此粘贴文档内容…"></textarea>
+        </label>
+      </div>
+
+      <div class="kb-fields">
+        <label class="field"><span>标题</span>
+          <input id="kb-doc-title" class="input" placeholder="留空则用文件名 / front matter" /></label>
+        <div class="row">
+          <label class="field"><span>文档类型</span>
+            <input id="kb-doc-type" class="input" placeholder="document" /></label>
+          <label class="field"><span>版本</span>
+            <input id="kb-version" class="input" placeholder="v1.0" /></label>
+        </div>
+        <div class="row">
+          <label class="field"><span>密级 (security_level)</span>
+            <select id="kb-sec-level" class="input">
+              <option value="public">public</option>
+              <option value="internal" selected>internal</option>
+              <option value="confidential">confidential</option>
+              <option value="secret">secret</option>
+            </select>
+          </label>
+          <label class="field"><span>可见角色（逗号分隔，留空 = 所有人）</span>
+            <input id="kb-roles" class="input" placeholder="如：engineer, tester" /></label>
+        </div>
+        <label class="field"><span>产品线（可选）</span>
+          <input id="kb-product-line" class="input" placeholder="留空表示不限" /></label>
+      </div>
+    </div>
+    <footer class="modal-foot">
+      <span id="kb-modal-msg" class="muted sm"></span>
+      <div class="row">
+        <button id="kb-cancel" class="btn btn-ghost" type="button">取消</button>
+        <button id="kb-submit" class="btn btn-primary" type="button">导入</button>
+      </div>
+    </footer>
+  </div>
+</div>
+
+<!-- ============ 自定义工具模态框 ============ -->
+<div id="ct-mask" class="modal-mask" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="ct-title">
+    <header class="modal-head">
+      <h3 id="ct-title">新建自定义工具</h3>
+      <button id="ct-close" class="modal-x" type="button" title="关闭" aria-label="关闭">
+        <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor"
+             stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4l8 8M12 4l-8 8" /></svg>
+      </button>
+    </header>
+    <div class="modal-body">
+      <div class="ct-cols">
+        <div class="ct-left">
+          <label class="field"><span>名称 <b class="req">*</b></span>
+            <input id="ct-name" class="input" placeholder="如 http_health_check" /></label>
+          <label class="field"><span>描述</span>
+            <textarea id="ct-desc" class="input" rows="2" placeholder="这个工具做什么（给模型看）"></textarea></label>
+          <div class="row">
+            <label class="field"><span>类型 (kind)</span>
+              <select id="ct-kind" class="input">
+                <option value="http">HTTP 请求</option>
+                <option value="script">本地 Python 脚本</option>
+              </select>
+            </label>
+            <label class="field"><span>权限</span>
+              <select id="ct-perm" class="input">
+                <option value="READ_ONLY">READ_ONLY</option>
+                <option value="COMPUTE">COMPUTE</option>
+                <option value="WRITE_DATA">WRITE_DATA</option>
+                <option value="EXTERNAL_SIDE_EFFECT">EXTERNAL_SIDE_EFFECT</option>
+                <option value="ADMIN">ADMIN</option>
+              </select>
+            </label>
+          </div>
+          <div class="row">
+            <label class="field"><span>启用</span>
+              <select id="ct-enabled" class="input">
+                <option value="true">启用</option>
+                <option value="false">停用</option>
+              </select>
+            </label>
+            <label class="field"><span>人工确认 (HITL)</span>
+              <select id="ct-hitl" class="input">
+                <option value="false">否</option>
+                <option value="true">是</option>
+              </select>
+            </label>
+          </div>
+          <div id="ct-hitl-note" class="muted sm hitl-note" hidden></div>
+
+          <label class="field"><span>入参 JSON Schema <b class="req">*</b></span>
+            <textarea id="ct-schema" class="input mono" rows="6"></textarea></label>
+
+          <div id="ct-cfg-http">
+            <label class="field"><span>URL <b class="req">*</b></span>
+              <input id="ct-url" class="input" placeholder="http://127.0.0.1:8010/health" /></label>
+            <div class="row">
+              <label class="field"><span>方法</span>
+                <select id="ct-method" class="input">
+                  <option>GET</option><option>POST</option><option>PUT</option>
+                  <option>DELETE</option><option>PATCH</option>
+                </select>
+              </label>
+              <label class="field"><span>result_path（点号路径）</span>
+                <input id="ct-resultpath" class="input" placeholder="如 data.items.0.id（留空返回整个响应）" /></label>
+            </div>
+            <label class="field"><span>Headers（JSON）</span>
+              <textarea id="ct-headers" class="input mono" rows="2" placeholder='{"X-Token":"abc"}'></textarea></label>
+            <label class="field"><span>Body 模板（支持 {args.xxx} 占位）</span>
+              <textarea id="ct-body" class="input mono" rows="3" placeholder='{"q":"{args.query}"}'></textarea></label>
+          </div>
+
+          <div id="ct-cfg-script" hidden>
+            <div class="warn-box">本地脚本工具会在<strong>独立子进程</strong>中执行您指定的本地 Python 文件
+              （超时 + 输出上限保护，禁止 eval/exec）。请只添加您信任的脚本。</div>
+            <label class="field"><span>脚本路径 <b class="req">*</b></span>
+              <input id="ct-scriptpath" class="input" placeholder="data/scripts/demo_tool.py" /></label>
+            <div class="row">
+              <label class="field"><span>函数名 <b class="req">*</b></span>
+                <input id="ct-funcname" class="input" placeholder="run(args) -> dict" /></label>
+              <label class="field"><span>超时（秒）</span>
+                <input id="ct-timeout" class="input" type="number" value="15" min="1" max="120" /></label>
+            </div>
+          </div>
+        </div>
+
+        <div class="ct-right">
+          <label class="field"><span>示例参数（JSON）</span>
+            <textarea id="ct-testargs" class="input mono" rows="5" placeholder='{"query":"T101_VDD_FUNCT"}'></textarea></label>
+          <button id="ct-test" class="btn btn-ghost sm wide" type="button">试运行</button>
+          <div id="ct-test-out" class="test-out"><div class="muted sm">填好上面的参数后点「试运行」，这里会显示实际返回 JSON 或错误信息。</div></div>
+        </div>
+      </div>
+
+      <h4 class="sec-title">已注册的自定义工具</h4>
+      <div id="ct-list" class="ct-list"><div class="muted sm">加载中…</div></div>
+    </div>
+    <footer class="modal-foot">
+      <span id="ct-msg" class="muted sm"></span>
+      <div class="row">
+        <button id="ct-cancel" class="btn btn-ghost" type="button">关闭</button>
+        <button id="ct-save" class="btn btn-primary" type="button">保存</button>
+      </div>
+    </footer>
+  </div>
+</div>
+
+<!-- ============ 任务详情抽屉 ============ -->
+<div id="td-mask" class="drawer-mask" hidden>
+  <div class="drawer">
+    <header class="modal-head">
+      <h3 id="td-title">任务详情</h3>
+      <button id="td-close" class="modal-x" type="button" title="关闭" aria-label="关闭">
+        <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor"
+             stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4l8 8M12 4l-8 8" /></svg>
+      </button>
+    </header>
+    <div class="drawer-body">
+      <section class="td-sec">
+        <h4>基本信息</h4>
+        <div id="td-basic" class="td-kv"></div>
+      </section>
+      <section class="td-sec">
+        <h4>Prompt</h4>
+        <pre id="td-prompt" class="td-pre"></pre>
+      </section>
+      <section class="td-sec">
+        <h4>完整答案</h4>
+        <div id="td-answer" class="td-answer"></div>
+      </section>
+      <section class="td-sec">
+        <h4>工具调用轨迹 <small id="td-trace-count"></small></h4>
+        <div id="td-trace" class="td-timeline"></div>
+      </section>
+      <section class="td-sec" id="td-error-sec" hidden>
+        <h4>错误详情</h4>
+        <pre id="td-error" class="td-pre err"></pre>
+      </section>
+      <section class="td-sec">
+        <h4>SSE 事件序列 <small id="td-sse-count"></small></h4>
+        <div id="td-sse" class="td-sse"></div>
+      </section>
+      <section class="td-sec">
+        <h4>原始 JSON</h4>
+        <details class="td-raw">
+          <summary>展开查看完整任务对象</summary>
+          <pre id="td-raw" class="td-pre"></pre>
+        </details>
+      </section>
+    </div>
+    <footer class="modal-foot">
+      <span id="td-msg" class="muted sm"></span>
+      <div class="row">
+        <button id="td-export-json" class="btn btn-ghost sm" type="button">导出 JSON</button>
+        <button id="td-export-md" class="btn btn-ghost sm" type="button">导出 Markdown</button>
+        <button id="td-close2" class="btn btn-primary sm" type="button">关闭</button>
+      </div>
+    </footer>
+  </div>
+</div>
+
+
+<!-- ============ 标题栏下拉菜单（文件 / 编辑 / 视图） ============ -->
+<div id="menu-popover" class="menu-popover" hidden role="menu" aria-label="主菜单">
+  <div class="menu-items" id="menu-items"></div>
+</div>
+
+<!-- ============ 模型选择器 popover ============ -->
+<div id="model-popover" class="popover model-popover" hidden role="dialog" aria-label="选择模型">
+  <div class="popover-head">
+    <span class="popover-title">选择模型</span>
+    <button type="button" class="popover-x" id="model-popover-close" title="关闭" aria-label="关闭模型选择器">
+      <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor"
+           stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4l8 8M12 4l-8 8"/></svg>
+    </button>
+  </div>
+  <div class="popover-body">
+    <div class="model-list" id="model-list"><div class="muted sm">加载中…</div></div>
+    <!-- 一键启动：勾选要启动哪些模型（与上面的「选一个模型」是两件事：
+         上面决定**发给谁**，这里决定**哪些模型进程要跑起来**） -->
+    <div class="msvc-pick-sec">
+      <div class="msvc-pick-sec-head">
+        <span class="msvc-pick-sec-title">选择启动哪些模型</span>
+        <button type="button" class="link-btn sm" id="btn-msvc-pick-none">全不选</button>
+      </div>
+      <div class="msvc-pick-list" id="msvc-pick-list"><div class="muted sm">加载中…</div></div>
+      <div class="msvc-pick-msg muted sm" id="msvc-pick-msg"></div>
+    </div>
+  </div>
+  <div class="popover-foot">
+    <button type="button" class="link-btn" id="btn-add-model">
+      <svg class="inline-ico" viewBox="0 0 16 16" width="13" height="13" fill="none"
+           stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M8 3.2v9.6M3.2 8h9.6"/>
+      </svg>
+      添加自定义模型
+    </button>
+    <button type="button" class="btn btn-primary sm" id="btn-msvc-apply">一键启动</button>
+  </div>
+</div>
+
+<!-- ============ 模式选择器 popover ============ -->
+<div id="mode-popover" class="popover mode-popover" hidden role="dialog" aria-label="选择交互模式">
+  <div class="popover-head">
+    <span class="popover-title">交互模式</span>
+    <button type="button" class="popover-x" id="mode-popover-close" title="关闭" aria-label="关闭模式选择器">
+      <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor"
+           stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4l8 8M12 4l-8 8"/></svg>
+    </button>
+  </div>
+  <div class="popover-body">
+    <div class="mode-list" id="mode-list"></div>
+  </div>
+</div>
+
+<!-- ============ 桌面版「一键启动」面板 ============
+     为什么不用 .popover（带阴影）：
+       ui_style_check.py 断言「带阴影的浮层元素 ≤ 8 处」，当前页面**已经正好 8 处**，
+       再加一个带阴影的浮层就会超标。这个面板改成**无阴影**的定位面板
+       （靠 --bg-4 底色 + --line-strong 描边与标题栏区分），
+       既不占阴影预算，视觉上也保持 Cursor 的「少阴影」语言。 -->
+<div id="launch-panel" class="launch-panel" hidden role="dialog" aria-label="一键启动">
+  <div class="launch-head">
+    <span class="launch-title">一键启动</span>
+    <span class="launch-summary" id="launch-summary">读取平台状态…</span>
+    <button type="button" class="popover-x" id="launch-close" title="关闭" aria-label="关闭一键启动面板">
+      <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor"
+           stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4l8 8M12 4l-8 8"/></svg>
+    </button>
+  </div>
+  <div class="launch-body">
+    <div class="launch-list" id="launch-list"><div class="muted sm">读取模型列表…</div></div>
+    <div class="launch-msg" id="launch-msg"></div>
+  </div>
+  <div class="launch-foot">
+    <span class="launch-links">
+      <button type="button" class="link-btn" id="btn-launch-all">全部启动</button>
+      <button type="button" class="link-btn" id="btn-launch-none">全部停止</button>
+    </span>
+    <button type="button" class="btn btn-primary sm" id="btn-launch-go">启动</button>
+  </div>
+</div>
+
+<!-- ============ 自定义模型编辑模态框 ============ -->
+<div id="mm-mask" class="modal-mask" hidden>
+  <div class="modal modal-model" role="dialog" aria-modal="true" aria-labelledby="mm-title">
+    <header class="modal-head">
+      <h3 id="mm-title">添加自定义模型</h3>
+      <button id="mm-close" class="modal-x" type="button" title="关闭" aria-label="关闭">
+        <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor"
+             stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4l8 8M12 4l-8 8"/></svg>
+      </button>
+    </header>
+    <div class="modal-body">
+      <label class="field"><span>名称 <b class="req">*</b></span>
+        <input id="mm-name" class="input" placeholder="如 my-local-llm" /></label>
+      <label class="field"><span>Base URL <b class="req">*</b></span>
+        <input id="mm-base-url" class="input" placeholder="http://127.0.0.1:8080/v1" /></label>
+      <label class="field"><span>端点上的模型名</span>
+        <input id="mm-model" class="input" placeholder="留空则用名称" /></label>
+      <label class="field"><span>描述</span>
+        <input id="mm-desc" class="input" placeholder="这个模型是做什么的" /></label>
+      <div class="row">
+        <label class="field"><span>推理强度</span>
+          <select id="mm-effort" class="input">
+            <option value="low">low</option>
+            <option value="medium" selected>medium</option>
+            <option value="high">high</option>
+          </select>
+        </label>
+        <label class="field"><span>温度</span>
+          <input id="mm-temp" class="input" type="number" value="0.2" step="0.1" min="0" max="2" /></label>
+      </div>
+      <div class="row">
+        <label class="field"><span>max_tokens</span>
+          <input id="mm-maxtok" class="input" type="number" value="2048" min="256" step="256" /></label>
+        <label class="field"><span>超时（秒）</span>
+          <input id="mm-timeout" class="input" type="number" value="180" min="5" max="1800" /></label>
+      </div>
+      <label class="field"><span>支持工具调用</span>
+        <select id="mm-tools" class="input">
+          <option value="true">是</option>
+          <option value="false">否</option>
+        </select>
+      </label>
+      <div id="mm-msg" class="muted sm"></div>
+    </div>
+    <footer class="modal-foot">
+      <span class="muted sm">注册后会**真实探测**端点可达性，不可用的模型会标红。</span>
+      <div class="row">
+        <button id="mm-cancel" class="btn btn-ghost" type="button">取消</button>
+        <button id="mm-save" class="btn btn-primary" type="button">保存</button>
+      </div>
+    </footer>
+  </div>
+</div>
+
+<!-- approval.js 必须在 app.js 之前加载：它持有审批的**唯一事实来源**
+     （APPROVAL.resolved）与广播机制，各界面都订阅它。 -->
+<script src="/ui/approval.js?v=20261124a"></script>
+<script src="/ui/app.js?v=20261124a"></script>
+<script src="/ui/workbench.js?v=20261122d"></script>
+<script src="/ui/custom_tools.js?v=20261122d"></script>
+<script src="/ui/kb_admin.js?v=20261122d"></script>
+<script src="/ui/workspace.js?v=20261122f"></script>
+<script src="/ui/trace_view.js?v=20261122f"></script>
+<script src="/ui/observability.js?v=20261124a"></script>
+<script src="/ui/timeline.js?v=20261124a"></script>
+</body>
+</html>

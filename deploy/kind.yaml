@@ -1,0 +1,45 @@
+# kind 单节点集群配置 —— 本地验证 K8s 编排用
+#
+# ⚠️ 前置条件（当前本机不满足）：
+#    WslService 与 com.docker.service 均为 Disabled
+#    执行 deploy\enable_k8s.ps1 开启（需管理员权限）
+#
+# 用法：
+#    kind create cluster --config deploy\kind.yaml
+#    kubectl cluster-info --context kind-agent
+#    kubectl apply -f deploy\k8s.yaml
+
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: agent
+
+nodes:
+  # 控制平面兼 GPU 节点（本地单节点，GPU 通过 device plugin 透传）
+  - role: control-plane
+    kubeadmConfigPatches:
+      - |
+        kind: InitConfiguration
+        nodeRegistration:
+          kubeletExtraArgs:
+            node-labels: "agent.io/tier=cpu,nvidia.com/gpu.present=true"
+    extraPortMappings:
+      # API
+      - containerPort: 30001
+        hostPort: 8000
+        protocol: TCP
+      # gpt-oss
+      - containerPort: 30002
+        hostPort: 8080
+        protocol: TCP
+      # qwen
+      - containerPort: 30003
+        hostPort: 8081
+        protocol: TCP
+      # postgres
+      - containerPort: 30004
+        hostPort: 5432
+        protocol: TCP
+    extraMounts:
+      # 把本地 GGUF 模型挂进集群（生产应改用对象存储 + InitContainer 拉取）
+      - hostPath: E:\model\models\lmstudio-community
+        containerPath: /host-models

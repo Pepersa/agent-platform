@@ -1,0 +1,1355 @@
+/* ==========================================================================
+   运行观测（Observability）—— 原生 CSS，无框架、无 CDN、无外链
+   --------------------------------------------------------------------------
+   本文件承载 12 个观测组件的样式。**全部使用 `.obs-` 作用域类**，
+   不写任何裸元素选择器（裸选择器会污染工作区编辑器叠层 —— 见 app.css 第 133 行
+   的历史踩坑说明）。
+
+   设计令牌全部复用 app.css 的 `:root` 变量，**不新增颜色常量**：
+
+   | 语义                | 变量                    | 用在哪                          |
+   |---------------------|-------------------------|--------------------------------|
+   | 模型调用 / 强调     | --accent                | LLM 调用条、选中态、主按钮      |
+   | 工具调用            | --accent-2              | 工具调用条（紫，与 LLM 区分）    |
+   | 审批等待            | --hitl / --warn         | 审批条、等待态、倒计时          |
+   | 成功                | --ok / --ok-soft        | 状态点成功、工具卡成功          |
+   | 失败                | --err / --err-soft      | 状态点失败、错误区              |
+   | 运行中              | --run / --run-soft      | 脉动状态点、进行中的条          |
+   | 次要文字            | --fg-dim / --fg-faint   | 标签、摘要、时间戳              |
+   | 面板底 / 分隔线     | --bg-1 / --bg-2 / --line| 卡片、轨道、边框                |
+   | 悬停底              | --bg-4                  | 行 hover、按钮 hover            |
+
+   规范约束：13px 正文、4px 栅格、120ms 过渡、零渐变、零阴影（除浮层）、
+   圆角 ≤ 6px（除胶囊徽标 999px）、尊重 prefers-reduced-motion。
+   ========================================================================== */
+
+/* ==========================================================================
+   1. 观测面板外壳
+   ========================================================================== */
+.obs-page {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: var(--bg-2);
+}
+
+/* ---- 头部 ---- */
+.obs-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border-bottom: 1px solid var(--line-soft);
+  background: var(--bg-1);
+  flex: none;
+}
+.obs-title {
+  font-size: var(--fs-base);
+  font-weight: 600;
+  color: var(--fg-strong);
+}
+.obs-sub {
+  font-size: var(--fs-sm);
+  color: var(--fg-faint);
+}
+
+/* ---- 视图切换分段控件 ---- */
+.obs-seg {
+  display: inline-flex;
+  align-items: stretch;
+  gap: 2px;
+  padding: 2px;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  /* 空间不足时横向滚动，而不是折行 —— 折行会让最后一行只剩一两个按钮，
+     右侧留下大片空白，且视觉上像坏掉了（Cursor 的分段控件同样行为）。 */
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  scrollbar-width: none;
+  max-width: 100%;
+  min-width: 0;
+}
+.obs-seg::-webkit-scrollbar { height: 0; }
+.obs-seg-btn {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--fg-dim);
+  font: inherit;
+  font-size: var(--fs-sm);
+  line-height: 1;
+  padding: 4px var(--sp-2);
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  white-space: nowrap;
+  flex: none;
+  transition: background var(--transition), color var(--transition);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.obs-seg-btn:hover { background: var(--bg-4); color: var(--fg); }
+.obs-seg-btn[aria-selected="true"] {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+.obs-seg-btn:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+
+/* ---- 内容区 ---- */
+.obs-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: var(--sp-4);
+}
+.obs-view { display: none; }
+.obs-view.is-active { display: block; }
+
+/* ---- 区块标题 ---- */
+.obs-sec-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-2);
+}
+.obs-sec-title {
+  font-size: var(--fs-md);
+  font-weight: 600;
+  color: var(--fg);
+  margin: 0;
+}
+.obs-sec-note {
+  font-size: var(--fs-xs);
+  color: var(--fg-faint);
+}
+
+/* ==========================================================================
+   2. 空态（每个组件共用）
+   ========================================================================== */
+.obs-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-2);
+  padding: var(--sp-6) var(--sp-4);
+  min-height: 120px;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--r-md);
+  background: var(--bg-1);
+  text-align: center;
+}
+.obs-empty-ico {
+  color: var(--fg-mute);
+  opacity: .8;
+}
+.obs-empty-title {
+  font-size: var(--fs-base);
+  color: var(--fg-dim);
+}
+.obs-empty-hint {
+  font-size: var(--fs-sm);
+  color: var(--fg-faint);
+  max-width: 460px;
+  line-height: 1.6;
+}
+
+/* ==========================================================================
+   3. P0-1 Trace Waterfall（时间瀑布）
+   --------------------------------------------------------------------------
+   布局：左侧标签列（固定宽）+ 右侧时间轨道（横向可滚动）。
+   每根条按 **真实开始/结束时间** 在轨道上绝对定位（left = 起始比例，
+   width = 跨度比例），**不是等宽列表**。
+   ========================================================================== */
+.obs-wf {
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--bg-1);
+  overflow: hidden;
+}
+.obs-wf-scroll {
+  overflow-x: auto;
+  overflow-y: visible;
+}
+.obs-wf-inner {
+  position: relative;
+  min-width: 100%;
+  padding: var(--sp-2) 0;
+}
+/* ---- 时间刻度（顶部轴）---- */
+.obs-wf-axis {
+  position: relative;
+  height: 20px;
+  border-bottom: 1px solid var(--line-soft);
+  margin-bottom: var(--sp-1);
+}
+.obs-wf-tick {
+  position: absolute;
+  top: 0;
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  color: var(--fg-mute);
+  border-left: 1px solid var(--line-soft);
+  padding-left: 3px;
+  height: 100%;
+  white-space: nowrap;
+  pointer-events: none;
+}
+/* ---- 一行（标签 + 轨道）---- */
+.obs-wf-row {
+  display: flex;
+  align-items: stretch;
+  min-height: 26px;
+  position: relative;
+}
+.obs-wf-row:hover .obs-wf-label { background: var(--bg-4); }
+.obs-wf-label {
+  flex: none;
+  width: 190px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px var(--sp-2);
+  font-size: var(--fs-sm);
+  color: var(--fg-dim);
+  border-right: 1px solid var(--line-soft);
+  background: var(--bg-1);
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  min-width: 0;
+  transition: background var(--transition);
+}
+.obs-wf-label .obs-wf-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mono);
+}
+.obs-wf-track {
+  flex: 1 1 auto;
+  position: relative;
+  min-height: 26px;
+  min-width: 0;
+}
+/* ---- 条形本体 ----
+   关键约束：条形的 **布局宽度必须严格等于真实时间比例**，
+   所以内部文字（耗时/token/最慢）不能参与 flex 宽度计算，
+   否则 `flex:none` 的文本会把极短步骤的条撑到 12px，比例失真。
+   因此文字统一放进 .obs-wf-bar-txt（绝对定位覆盖层），
+   条形本体只保留背景色与 1px 边框。 */
+.obs-wf-bar {
+  position: absolute;
+  top: 5px;
+  height: 16px;
+  border-radius: var(--r-sm);
+  padding: 0;
+  font-size: var(--fs-xs);
+  font-family: var(--mono);
+  color: var(--fg-strong);
+  cursor: pointer;
+  min-width: 2px;
+  overflow: visible;
+  border: 1px solid transparent;
+  transition: filter var(--transition), border-color var(--transition);
+}
+/* 覆盖层：承载文字，允许溢出条形，不影响条形自身宽度 */
+.obs-wf-bar-txt {
+  position: absolute;
+  left: 0;
+  top: 0;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 5px;
+  white-space: nowrap;
+  pointer-events: none;
+  overflow: hidden;
+  max-width: none;
+}
+/* 条形太窄时文字移到条形右侧（.obs-wf-bar.is-narrow），避免糊成一团 */
+.obs-wf-bar.is-narrow .obs-wf-bar-txt {
+  left: 100%;
+  padding-left: 4px;
+  border-radius: var(--r-sm);
+}
+.obs-wf-bar:hover { filter: brightness(1.25); border-color: var(--fg-faint); }
+.obs-wf-bar:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
+/* 类型语义色：LLM=--accent，工具=--accent-2，审批=--hitl */
+.obs-wf-bar.kind-llm { background: var(--accent-soft); border-color: var(--accent-line); }
+.obs-wf-bar.kind-tool { background: var(--accent-2-soft); border-color: var(--accent-2-line); }
+.obs-wf-bar.kind-approval {
+  background: var(--hitl-bar-bg);
+  border-color: var(--hitl-bar-line);
+}
+.obs-wf-bar.state-err { background: var(--err-soft); border-color: var(--err); color: var(--err-fg-soft); }
+.obs-wf-bar.state-run {
+  background: var(--run-soft);
+  border-color: var(--run);
+}
+/* ---- 最慢一步标记 ---- */
+.obs-wf-slowest {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--warn);
+  background: var(--warn-soft);
+  border: 1px solid var(--warn-line-strong);
+  border-radius: var(--r-pill);
+  padding: 0 6px;
+  flex: none;
+}
+.obs-wf-bar.is-slowest { border-width: 1px; border-color: var(--warn); }
+.obs-wf-dur { color: var(--fg-dim); flex: none; }
+.obs-wf-tok { color: var(--fg-faint); flex: none; }
+.obs-wf-foot {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+  padding: var(--sp-2) var(--sp-3);
+  border-top: 1px solid var(--line-soft);
+  background: var(--bg-2);
+  font-size: var(--fs-xs);
+  color: var(--fg-faint);
+}
+.obs-wf-legend {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.obs-wf-legend-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--line-strong);
+  flex: none;
+}
+.obs-wf-legend-dot.k-llm { background: var(--accent-soft); border-color: var(--accent-line); }
+.obs-wf-legend-dot.k-tool { background: var(--accent-2-soft); border-color: var(--accent-2-line); }
+.obs-wf-legend-dot.k-approval { background: var(--hitl-bar-bg); border-color: var(--hitl-bar-line); }
+
+/* ==========================================================================
+   4. P0-2 Tool Call Card（工具调用卡）
+   ========================================================================== */
+.obs-tc-group {
+  margin-bottom: var(--sp-3);
+}
+.obs-tc-group-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  width: 100%;
+  padding: var(--sp-2) var(--sp-3);
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  cursor: pointer;
+  font: inherit;
+  color: var(--fg);
+  text-align: left;
+  transition: background var(--transition);
+}
+.obs-tc-group-head:hover { background: var(--bg-4); }
+.obs-tc-group-head:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+.obs-tc-group-name {
+  font-family: var(--mono);
+  font-weight: 600;
+  color: var(--fg-strong);
+}
+.obs-tc-count {
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  color: var(--fg-dim);
+  background: var(--bg-4);
+  border-radius: var(--r-pill);
+  padding: 0 6px;
+  flex: none;
+}
+/* ---- 单张卡 ---- */
+.obs-tc {
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--bg-1);
+  margin-top: var(--sp-2);
+  overflow: hidden;
+}
+.obs-tc.is-error { border-left: 2px solid var(--err); }
+.obs-tc.is-running { border-left: 2px solid var(--run); }
+.obs-tc > summary {
+  list-style: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  min-height: var(--treerow-h);
+  transition: background var(--transition);
+}
+.obs-tc > summary::-webkit-details-marker { display: none; }
+.obs-tc > summary:hover { background: var(--bg-4); }
+.obs-tc[open] > summary { border-bottom: 1px solid var(--line-soft); }
+.obs-tc-caret {
+  width: 12px;
+  height: 12px;
+  flex: none;
+  color: var(--fg-faint);
+  transition: transform var(--transition);
+}
+.obs-tc[open] .obs-tc-caret { transform: rotate(90deg); }
+.obs-tc-name {
+  font-family: var(--mono);
+  color: var(--fg-strong);
+  font-weight: 600;
+  flex: none;
+}
+.obs-tc-sum {
+  font-size: var(--fs-sm);
+  color: var(--fg-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.obs-tc-dur {
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  color: var(--fg-faint);
+  flex: none;
+}
+/* ---- 状态点 ---- */
+.obs-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--r-pill);
+  flex: none;
+  display: inline-block;
+}
+.obs-dot.ok { background: var(--ok); }
+.obs-dot.err { background: var(--err); }
+.obs-dot.run {
+  background: var(--warn);
+  animation: obs-pulse 1.2s ease-in-out infinite;
+}
+.obs-dot.wait { background: var(--hitl); }
+@keyframes obs-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: .28; }
+}
+/* ---- 展开体：参数 / 结果两区 ---- */
+.obs-tc-body {
+  padding: var(--sp-2) var(--sp-3);
+  background: var(--bg-2);
+}
+.obs-tc-zone {
+  margin-bottom: var(--sp-3);
+}
+.obs-tc-zone:last-child { margin-bottom: 0; }
+.obs-tc-zone-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-bottom: 3px;
+}
+.obs-tc-zone-title {
+  font-size: var(--fs-xs);
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: var(--fg-faint);
+  font-weight: 600;
+}
+.obs-tc-zone[data-zone="args"] .obs-tc-zone-title { color: var(--accent); }
+.obs-tc-zone[data-zone="result"] .obs-tc-zone-title { color: var(--ok); }
+.obs-tc-zone[data-zone="error"] .obs-tc-zone-title { color: var(--err); }
+.obs-tc-copy {
+  margin-left: auto;
+  height: 18px;
+  padding: 0 6px;
+  font-size: var(--fs-xs);
+  color: var(--fg-dim);
+  background: var(--bg-4);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  transition: color var(--transition), border-color var(--transition);
+}
+.obs-tc-copy:hover { color: var(--accent); border-color: var(--accent-line); }
+.obs-tc-copy.done { color: var(--ok); border-color: var(--ok-line); }
+.obs-tc-json {
+  margin: 0;
+  padding: var(--sp-2) var(--sp-3);
+  background: var(--bg-0);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  line-height: 1.55;
+  color: var(--fg);
+  white-space: pre;
+  overflow: auto;
+  max-height: 240px;
+  tab-size: 2;
+}
+/* ---- 错误区 ---- */
+.obs-tc-err {
+  border: 1px solid var(--err);
+  border-radius: var(--r-md);
+  background: var(--err-soft);
+  padding: var(--sp-2) var(--sp-3);
+}
+.obs-tc-err-code {
+  font-family: var(--mono);
+  color: var(--err);
+  font-weight: 600;
+  margin-right: var(--sp-2);
+}
+.obs-tc-err-msg { color: var(--err-fg-soft); font-size: var(--fs-md); word-break: break-word; }
+.obs-tc-err-hint {
+  margin-top: 3px;
+  font-size: var(--fs-xs);
+  color: var(--fg-dim);
+  padding-left: var(--sp-2);
+  border-left: 2px solid var(--line-strong);
+}
+.obs-tc-retry {
+  margin-top: var(--sp-2);
+  height: 22px;
+  padding: 0 var(--sp-2);
+  font-size: var(--fs-xs);
+  color: var(--err);
+  background: transparent;
+  border: 1px solid var(--err);
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  transition: background var(--transition);
+}
+.obs-tc-retry:hover { background: var(--err-soft); }
+
+/* ==========================================================================
+   5. P0-3 Agent Sequence（时序图）
+   ========================================================================== */
+.obs-seq {
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--bg-1);
+  overflow: hidden;
+}
+.obs-seq-scroll {
+  overflow: auto;
+  max-height: 620px;
+}
+.obs-seq-inner {
+  position: relative;
+  min-width: 100%;
+  padding: 0 0 var(--sp-4);
+}
+/* ---- 参与者表头 ---- */
+.obs-seq-head {
+  display: flex;
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  background: var(--bg-2);
+  border-bottom: 1px solid var(--line);
+}
+.obs-seq-part {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: var(--sp-2) 4px;
+  border-right: 1px solid var(--line-soft);
+  cursor: pointer;
+  background: transparent;
+  border-top: 0;
+  border-left: 0;
+  border-bottom: 0;
+  font: inherit;
+  transition: background var(--transition);
+}
+.obs-seq-part:hover { background: var(--bg-4); }
+.obs-seq-part:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+.obs-seq-part-name {
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  color: var(--fg);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.obs-seq-part-role {
+  font-size: var(--fs-xs);
+  color: var(--fg-mute);
+}
+/* 参与者色条：用左侧色带标识归属 */
+.obs-seq-part-bar {
+  width: 100%;
+  height: 2px;
+  border-radius: var(--r-pill);
+  flex: none;
+}
+/* ---- 生命线 ---- */
+/* 用 border 虚线而不是 repeating-linear-gradient：
+   规范要求「零渐变」，虚线用 border-style: dashed 即可。 */
+.obs-seq-lifeline {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 0;
+  border-left: 1px dashed var(--line-strong);
+  pointer-events: none;
+}
+/* ---- 活动条（生命线上的工作期）---- */
+.obs-seq-active {
+  position: absolute;
+  width: 6px;
+  border-radius: var(--r-pill);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-line);
+  pointer-events: none;
+}
+/* ---- 消息箭头 ---- */
+.obs-seq-msg {
+  position: absolute;
+  height: 20px;
+  cursor: pointer;
+  z-index: 1;
+}
+.obs-seq-msg:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
+.obs-seq-msg-line {
+  position: absolute;
+  top: 9px;
+  height: 1px;
+  background: var(--accent);
+}
+.obs-seq-msg.call .obs-seq-msg-line { background: var(--accent); }
+.obs-seq-msg.reply .obs-seq-msg-line {
+  background: var(--fg-faint);
+  border-top: 1px dashed var(--fg-faint);
+  height: 0;
+}
+.obs-seq-msg-head {
+  position: absolute;
+  top: 10px;
+  font-size: var(--fs-xs);
+  font-family: var(--mono);
+  color: var(--fg-dim);
+  background: var(--bg-1);
+  padding: 0 3px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.obs-seq-msg.call .obs-seq-msg-head { left: 0; }
+.obs-seq-msg.reply .obs-seq-msg-head { right: 0; }
+/* ---- 嵌套框（labeled frame：并行 / 重试）---- */
+.obs-seq-frame {
+  position: absolute;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  pointer-events: none;
+}
+.obs-seq-frame-label {
+  position: absolute;
+  top: -8px;
+  left: var(--sp-2);
+  font-size: var(--fs-xs);
+  color: var(--fg-faint);
+  background: var(--bg-1);
+  padding: 0 4px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  white-space: nowrap;
+}
+.obs-seq-legend {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+  padding: var(--sp-2) var(--sp-3);
+  border-top: 1px solid var(--line-soft);
+  background: var(--bg-2);
+  font-size: var(--fs-xs);
+  color: var(--fg-faint);
+}
+
+/* ==========================================================================
+   6. P1-1 Cost Waterfall（成本瀑布）
+   ========================================================================== */
+.obs-cost {
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--bg-1);
+  overflow: hidden;
+}
+.obs-cost-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border-bottom: 1px solid var(--line-soft);
+  min-height: var(--treerow-h);
+}
+.obs-cost-row:last-child { border-bottom: 0; }
+.obs-cost-rank {
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  color: var(--fg-mute);
+  width: 20px;
+  flex: none;
+}
+.obs-cost-name {
+  font-family: var(--mono);
+  color: var(--fg);
+  flex: none;
+  width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.obs-cost-model {
+  font-size: var(--fs-xs);
+  color: var(--fg-faint);
+  flex: none;
+  width: 110px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.obs-cost-bar-wrap {
+  flex: 1 1 auto;
+  min-width: 60px;
+  height: 14px;
+  background: var(--bg-4);
+  border-radius: var(--r-sm);
+  overflow: hidden;
+  position: relative;
+}
+.obs-cost-bar {
+  display: block;
+  height: 100%;
+  background: var(--accent-soft);
+  border-right: 2px solid var(--accent);
+}
+.obs-cost-row.is-top .obs-cost-bar { background: var(--warn-soft); border-right-color: var(--warn); }
+.obs-cost-metric {
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  color: var(--fg-dim);
+  flex: none;
+  width: 92px;
+  text-align: right;
+}
+.obs-cost-note {
+  padding: var(--sp-2) var(--sp-3);
+  border-top: 1px solid var(--line-soft);
+  background: var(--bg-2);
+  font-size: var(--fs-xs);
+  color: var(--fg-faint);
+  line-height: 1.6;
+}
+
+/* ==========================================================================
+   7. P1-2 Context Map（上下文占用 treemap）
+   ========================================================================== */
+.obs-ctx-total {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--bg-1);
+  margin-bottom: var(--sp-3);
+  flex-wrap: wrap;
+}
+.obs-ctx-bar {
+  flex: 1 1 220px;
+  height: 6px;
+  background: var(--bg-4);
+  border-radius: var(--r-pill);
+  overflow: hidden;
+  min-width: 120px;
+}
+.obs-ctx-fill {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+}
+.obs-ctx-fill.is-high { background: var(--warn); }
+.obs-ctx-fill.is-over { background: var(--err); }
+.obs-ctx-num {
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  color: var(--fg);
+}
+.obs-tm {
+  position: relative;
+  width: 100%;
+  height: 320px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--bg-1);
+  overflow: hidden;
+}
+.obs-tm-cell {
+  position: absolute;
+  overflow: hidden;
+  border: 1px solid var(--bg-2);
+  cursor: pointer;
+  padding: 3px 5px;
+  font-size: var(--fs-xs);
+  color: var(--fg);
+  transition: filter var(--transition);
+}
+.obs-tm-cell:hover { filter: brightness(1.35); }
+.obs-tm-cell:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+.obs-tm-cell-name {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+.obs-tm-cell-size {
+  display: block;
+  font-family: var(--mono);
+  color: var(--fg-dim);
+}
+/* 上下文来源语义色（全部为 --*-soft 低饱和底 + 同色系边框） */
+.obs-tm-cell.k-system { background: var(--accent-soft); border-color: var(--accent-line); }
+.obs-tm-cell.k-tools { background: var(--accent-2-soft); border-color: var(--accent-2-line); }
+.obs-tm-cell.k-results { background: var(--ok-soft); border-color: var(--ok-line); }
+.obs-tm-cell.k-history { background: var(--warn-soft); border-color: var(--warn-line-strong); }
+.obs-tm-cell.k-files { background: var(--mode-ask-soft); border-color: var(--mode-ask-line); }
+.obs-tm-detail {
+  margin-top: var(--sp-3);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--bg-1);
+  padding: var(--sp-3);
+}
+.obs-tm-detail-row {
+  display: flex;
+  gap: var(--sp-2);
+  font-size: var(--fs-sm);
+  color: var(--fg-dim);
+  padding: 2px 0;
+  border-bottom: 1px solid var(--line-soft);
+}
+.obs-tm-detail-row:last-child { border-bottom: 0; }
+.obs-tm-detail-row b { color: var(--fg); font-weight: 600; }
+
+/* ==========================================================================
+   8. P1-3 Approval Card 增强（风险徽标 / 倒计时 / 快捷键）
+   ========================================================================== */
+.obs-risk {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  border-radius: var(--r-pill);
+  padding: 0 7px;
+  flex: none;
+  border: 1px solid transparent;
+}
+.obs-risk.high { color: var(--err); background: var(--err-soft); border-color: var(--err-line-strong); }
+.obs-risk.mid { color: var(--warn); background: var(--warn-soft); border-color: var(--warn-line-strong); }
+.obs-risk.low { color: var(--ok); background: var(--ok-soft); border-color: var(--ok-line); }
+.obs-wait {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  color: var(--hitl);
+  background: var(--hitl-soft);
+  border: 1px solid var(--hitl-line);
+  border-radius: var(--r-pill);
+  padding: 0 6px;
+  flex: none;
+}
+.obs-kbd {
+  display: inline-block;
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  line-height: 1;
+  padding: 2px 4px;
+  color: var(--fg-dim);
+  background: var(--bg-4);
+  border: 1px solid var(--line-strong);
+  border-bottom-width: 2px;
+  border-radius: var(--r-sm);
+  flex: none;
+}
+/* ---- 审批卡片的操作区（批准 / 拒绝）---- */
+.obs-ap-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border-top: 1px solid var(--line);
+  background: var(--bg-2);
+}
+.obs-ap-actor {
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  padding: 2px 6px;
+  width: 96px;
+  color: var(--fg);
+  background: var(--bg-1);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+}
+.obs-ap-grant {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--fs-sm);
+  color: var(--fg-dim);
+  white-space: nowrap;
+}
+.obs-btn {
+  font-family: var(--font);
+  font-size: var(--fs-sm);
+  line-height: 1;
+  padding: 4px 10px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--line-strong);
+  background: var(--bg-3);
+  color: var(--fg);
+  cursor: pointer;
+  transition: background var(--transition), border-color var(--transition), opacity var(--transition);
+}
+.obs-btn:hover:not(:disabled) { background: var(--bg-4); }
+.obs-btn:disabled { opacity: .5; cursor: default; }
+.obs-btn-ok { color: var(--ok); border-color: var(--ok-line-strong); }
+.obs-btn-ok:hover:not(:disabled) { background: var(--ok-soft); }
+.obs-btn-no { color: var(--err); border-color: var(--err-line-strong); }
+.obs-btn-no:hover:not(:disabled) { background: var(--err-soft); }
+.obs-btn:focus-visible,
+.obs-ap-actor:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
+/* ---- 已解决的审批卡：折叠成一行 ---- */
+.obs-tc-resolved .obs-tc-zone-head { opacity: .85; }
+.obs-resolved-sum {
+  font-size: var(--fs-sm);
+  color: var(--fg-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.obs-hint.err { color: var(--err); }
+
+/* ==========================================================================
+   9. P1-4 Diff Timeline（改动时间线）
+   ========================================================================== */
+.obs-dtl {
+  display: grid;
+  grid-template-columns: 200px 1fr;
+  gap: var(--sp-3);
+  align-items: start;
+}
+.obs-dtl-files {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+.obs-dtl-file {
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--bg-1);
+  padding: var(--sp-1) var(--sp-2);
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  color: var(--fg-dim);
+  transition: background var(--transition);
+}
+.obs-dtl-file:hover { background: var(--bg-4); color: var(--fg); }
+.obs-dtl-file:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+.obs-dtl-file.is-active { border-color: var(--accent-line); background: var(--accent-soft); color: var(--fg); }
+.obs-dtl-file-name {
+  display: block;
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.obs-dtl-file-bar {
+  display: block;
+  height: 3px;
+  background: var(--bg-4);
+  border-radius: var(--r-pill);
+  margin-top: 3px;
+  overflow: hidden;
+}
+.obs-dtl-file-fill {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+}
+.obs-dtl-edits {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.obs-dtl-edit {
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--bg-1);
+  overflow: hidden;
+}
+.obs-dtl-edit-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-1) var(--sp-2);
+  border-bottom: 1px solid var(--line-soft);
+  font-size: var(--fs-xs);
+  color: var(--fg-faint);
+}
+.obs-dtl-edit-body { padding: var(--sp-2); background: var(--bg-2); }
+.obs-dtl-edit-body .ws-diff { border-radius: var(--r-sm); overflow: hidden; }
+
+/* ==========================================================================
+   10. P2-1 Agent Timing（时间信号线）
+   ========================================================================== */
+.obs-sig {
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--bg-1);
+  overflow: hidden;
+}
+.obs-sig-scroll { overflow-x: auto; }
+.obs-sig-inner { position: relative; padding: var(--sp-3) 0 var(--sp-2); min-width: 100%; }
+.obs-sig-axis {
+  position: relative;
+  height: 16px;
+  border-bottom: 1px solid var(--line-soft);
+  margin-bottom: 2px;
+}
+.obs-sig-row {
+  display: flex;
+  align-items: center;
+  min-height: 22px;
+}
+.obs-sig-label {
+  flex: none;
+  width: 190px;
+  padding: 2px var(--sp-2);
+  font-size: var(--fs-sm);
+  color: var(--fg-dim);
+  border-right: 1px solid var(--line-soft);
+  position: sticky;
+  left: 0;
+  background: var(--bg-1);
+  z-index: 2;
+}
+.obs-sig-track {
+  flex: 1 1 auto;
+  position: relative;
+  height: 22px;
+  min-width: 0;
+}
+/* 三态高度编码：思考=微抬(4px)、工具=拉高(14px)、等待=琥珀虚线(2px) */
+.obs-sig-bar {
+  position: absolute;
+  bottom: 4px;
+  height: 4px;
+  border-radius: var(--r-pill);
+  background: var(--accent-2);
+  opacity: .75;
+}
+.obs-sig-bar.think { height: 4px; background: var(--accent-2); }
+.obs-sig-bar.tool { height: 14px; background: var(--accent); }
+.obs-sig-bar.wait {
+  height: 2px;
+  background: transparent;
+  border-top: 2px dashed var(--hitl);
+  border-radius: 0;
+}
+.obs-sig-lab {
+  position: absolute;
+  top: 0;
+  font-size: var(--fs-xs);
+  font-family: var(--mono);
+  color: var(--fg-dim);
+  white-space: nowrap;
+  pointer-events: none;
+}
+.obs-sig-legend {
+  display: flex;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+  padding: var(--sp-2) var(--sp-3);
+  border-top: 1px solid var(--line-soft);
+  background: var(--bg-2);
+  font-size: var(--fs-xs);
+  color: var(--fg-faint);
+}
+
+/* ==========================================================================
+   11. P2-2 Repo Map（代码库 treemap）
+   ========================================================================== */
+.obs-repo {
+  display: grid;
+  grid-template-columns: 1fr 240px;
+  gap: var(--sp-3);
+  align-items: start;
+}
+.obs-repo-tree {
+  position: relative;
+  height: 380px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--bg-1);
+  overflow: hidden;
+}
+.obs-repo-cell {
+  position: absolute;
+  overflow: hidden;
+  border: 1px solid var(--bg-2);
+  font-size: var(--fs-xs);
+  color: var(--fg);
+  padding: 2px 4px;
+  cursor: pointer;
+  transition: filter var(--transition);
+}
+.obs-repo-cell:hover { filter: brightness(1.35); }
+.obs-repo-cell:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+.obs-repo-cell.is-dir {
+  background: var(--obs-sel-bg);
+  border-color: var(--accent-line);
+  color: var(--fg-dim);
+}
+.obs-repo-cell.is-file { background: var(--bg-3); border-color: var(--line-strong); }
+.obs-repo-cell.is-edited { background: var(--ok-bg-strong); border-color: var(--ok-line-strong); }
+.obs-repo-cell-name {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.obs-repo-cursor {
+  position: absolute;
+  width: 9px;
+  height: 9px;
+  border-radius: var(--r-pill);
+  background: var(--accent);
+  border: 1px solid var(--bg-1);
+  pointer-events: none;
+  z-index: 4;
+}
+.obs-repo-side {
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--bg-1);
+  padding: var(--sp-2) var(--sp-3);
+}
+.obs-repo-stat {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  font-size: var(--fs-sm);
+  color: var(--fg-dim);
+  padding: 2px 0;
+  border-bottom: 1px solid var(--line-soft);
+}
+.obs-repo-stat:last-child { border-bottom: 0; }
+.obs-repo-stat b { color: var(--fg); font-family: var(--mono); font-weight: 600; }
+
+/* ==========================================================================
+   12. P2-3 Autonomy Dial（三档自主性）
+   ========================================================================== */
+.obs-dial {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--bg-1);
+  padding: var(--sp-4);
+}
+.obs-dial-track {
+  position: relative;
+  height: 34px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-md);
+  background: var(--bg-2);
+  display: flex;
+  overflow: hidden;
+}
+.obs-dial-seg {
+  flex: 1 1 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--fs-sm);
+  color: var(--fg-faint);
+  border-right: 1px solid var(--line-soft);
+  cursor: pointer;
+  transition: background var(--transition), color var(--transition);
+  background: transparent;
+  border-top: 0;
+  border-bottom: 0;
+  border-left: 0;
+  font-family: inherit;
+}
+.obs-dial-seg:last-child { border-right: 0; }
+.obs-dial-seg:hover { background: var(--bg-4); color: var(--fg); }
+.obs-dial-seg:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+.obs-dial-seg.is-on { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.obs-dial-seg.is-on.mid { background: var(--warn-soft); color: var(--warn); }
+.obs-dial-knob {
+  position: absolute;
+  top: -3px;
+  width: 3px;
+  height: 40px;
+  background: var(--fg-strong);
+  border-radius: var(--r-pill);
+  transition: left var(--transition-slow);
+  pointer-events: none;
+}
+.obs-dial-desc {
+  display: flex;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+}
+.obs-dial-note {
+  flex: 1 1 220px;
+  font-size: var(--fs-sm);
+  color: var(--fg-dim);
+  line-height: 1.6;
+  border-left: 2px solid var(--line-strong);
+  padding-left: var(--sp-2);
+}
+
+/* ==========================================================================
+   13. P2-4 Reasoning Summary（推理摘要卡）
+   ========================================================================== */
+.obs-rs {
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--bg-1);
+  padding: var(--sp-3);
+}
+.obs-rs-bar {
+  display: flex;
+  height: 14px;
+  border-radius: var(--r-sm);
+  overflow: hidden;
+  background: var(--bg-4);
+  margin-bottom: var(--sp-2);
+}
+.obs-rs-seg { height: 100%; min-width: 2px; }
+.obs-rs-seg.k-think { background: var(--accent-2); }
+.obs-rs-seg.k-tool { background: var(--accent); }
+.obs-rs-seg.k-result { background: var(--ok); }
+.obs-rs-seg.k-err { background: var(--err); }
+.obs-rs-seg.k-wait { background: var(--hitl); }
+.obs-rs-legend {
+  display: flex;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+  font-size: var(--fs-xs);
+  color: var(--fg-faint);
+}
+.obs-rs-legend-item { display: inline-flex; align-items: center; gap: 4px; }
+.obs-rs-key {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  font-size: var(--fs-sm);
+  color: var(--fg-dim);
+  padding: 2px 0;
+  border-bottom: 1px solid var(--line-soft);
+}
+.obs-rs-key:last-child { border-bottom: 0; }
+.obs-rs-key b { color: var(--fg); font-family: var(--mono); font-weight: 600; }
+
+/* ==========================================================================
+   14. 通用小组件
+   ========================================================================== */
+.obs-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: var(--fs-xs);
+  font-family: var(--mono);
+  border-radius: var(--r-pill);
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  background: var(--bg-3);
+  color: var(--fg-dim);
+  flex: none;
+}
+.obs-pill.ok { color: var(--ok); border-color: var(--ok-line); background: var(--ok-soft); }
+.obs-pill.err { color: var(--err); border-color: var(--err-line); background: var(--err-soft); }
+.obs-pill.warn { color: var(--warn); border-color: var(--warn-line); background: var(--warn-soft); }
+.obs-pill.acc { color: var(--accent); border-color: var(--accent-line); background: var(--accent-soft); }
+
+.obs-hint {
+  font-size: var(--fs-xs);
+  color: var(--fg-faint);
+  line-height: 1.6;
+}
+.obs-btn {
+  height: 22px;
+  padding: 0 var(--sp-2);
+  font-size: var(--fs-xs);
+  color: var(--fg-dim);
+  background: var(--bg-3);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  transition: color var(--transition), border-color var(--transition);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.obs-btn:hover { color: var(--accent); border-color: var(--accent-line); }
+.obs-btn:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+.obs-btn:disabled { opacity: .5; cursor: not-allowed; }
+
+.obs-kv {
+  display: flex;
+  gap: var(--sp-2);
+  font-size: var(--fs-sm);
+  color: var(--fg-dim);
+  padding: 2px 0;
+}
+.obs-kv b { color: var(--fg); font-weight: 600; }
+
+/* ==========================================================================
+   15. 响应式 + 降级
+   ========================================================================== */
+@media (max-width: 1180px) {
+  .obs-repo { grid-template-columns: 1fr; }
+  .obs-dtl { grid-template-columns: 1fr; }
+  .obs-wf-label, .obs-sig-label { width: 140px; }
+}
+@media (max-width: 820px) {
+  .obs-body { padding: var(--sp-2); }
+  .obs-wf-label, .obs-sig-label { width: 110px; }
+  .obs-cost-name { width: 100px; }
+  .obs-cost-model { display: none; }
+  /* 空间紧张时只留图标，文字标签移到 title / aria-label 里 */
+  .obs-seg-btn span { display: none; }
+  .obs-seg-btn { padding: 5px 7px; }
+}
+
+/* 尊重系统「减少动态效果」偏好：关掉脉动动画 */
+@media (prefers-reduced-motion: reduce) {
+  .obs-dot.run { animation: none; opacity: 1; }
+  .obs-dial-knob { transition: none; }
+}
