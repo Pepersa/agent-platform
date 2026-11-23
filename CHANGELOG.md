@@ -160,6 +160,34 @@ prevents, because every one of them was found in production use.
 
 ### Fixed
 
+- **The bilingual README's language switcher did not switch anything.** The consolidated landing
+  page put the English half in a `<details open>` block and the Chinese half in a second, collapsed
+  `<details>` block, and the header switcher linked to the plain page anchors `#english` and
+  `#chinese`. A fragment navigation to an anchor that sits *before* a collapsed `<details>` does not
+  open it: the browser scrolls to the anchor, the anchor sits just above the collapsed block, and
+  the reader lands on a closed `<summary>` with the other language still filling the page above it.
+  Clicking 「中文」 therefore scrolled the reader to the bottom of a collapsed block without ever
+  revealing it — the switcher moved the viewport, it did not change the language. The DOM looked
+  correct in every inspection tool, which is why the first attempt passed review and still failed in
+  the browser.
+
+  The switcher now points at an anchor that sits **inside** each block's content — the first
+  element of the Chinese half is `<a id="readme-chinese-start"></a>`, and the English half has its
+  own. That distinction is the whole fix: a fragment navigation whose target is *inside* a
+  collapsed `<details>` triggers the browser's "auto-expand details elements" behaviour, which
+  expands that block, whereas a target placed *beside* the block (as the old `#english` /
+  `#chinese` anchors were) only scrolls to it and changes nothing. Both `<details>` additionally
+  carry the same `name` attribute, which turns them into an exclusive accordion: opening one
+  closes the other, so exactly one language is visible at any time. The `<summary>` lines now read
+  「click to expand / 点击展开」 and name the other language, so the interaction is visible before the
+  reader clicks anything. The switcher still keeps the reader on the landing page — it never leaves
+  for a `blob/` file view.
+
+  Measured against the rendered GitHub page: clicking 「中文」 leaves the English block at 24 px tall
+  (collapsed) and the Chinese block at 37,017 px (expanded), and clicking 「English」 reverses both.
+  The English and Chinese halves keep their original heading counts (22 `##` and 75 `###` each) and
+  their 25 code blocks are byte-identical.
+
 - **Rounds were double-counted.** Both the agent node and the tools node called
   `BudgetGuard.check()`, which tests `rounds >= max_rounds`. But rounds are only charged by the
   agent node, so a single agent-to-tools round trip triggered the check twice. `max_rounds=8`

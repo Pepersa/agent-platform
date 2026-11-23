@@ -314,6 +314,56 @@ of the same file** in the same pull request — translate the prose, leave the c
 byte-identical, and keep the section count and ordering the same in each so switching languages
 stays seamless.
 
+### How the language switcher works
+
+The header switcher is not a set of decorative links — it is the primary way a reader moves
+between the two halves, so the markup around it is load-bearing. Do not "simplify" it away.
+
+Each half is a `<details>` element carrying **the same `name` attribute**, and each half opens
+with a **zero-height anchor that sits inside its own content**:
+
+```html
+<details name="user-content-readme-lang" open>
+<summary id="readme-english">…</summary>
+<a id="readme-english-start"></a>
+```
+
+```html
+<details name="user-content-readme-lang">
+<summary id="readme-chinese">…</summary>
+<a id="readme-chinese-start"></a>
+```
+
+The header links point at those two inner anchors, written with GitHub's `user-content-` prefix:
+
+```html
+<a href="#user-content-readme-english-start">English</a> | <a href="#user-content-readme-chinese-start">中文</a>
+```
+
+Three rules follow from that, and all three were established by testing against the rendered
+GitHub page rather than by reading the DOM:
+
+- **The `name` attribute must be identical on both blocks.** It is what makes them an exclusive
+  accordion: opening one closes the other, so exactly one language is visible at a time. If the two
+  names differ, both halves stay open and the "switcher" shows the reader everything at once.
+- **The header links must target an anchor *inside* the block, not one beside it.** A fragment
+  navigation whose target is inside a collapsed `<details>` triggers the browser's
+  "auto-expand details elements" behaviour, which expands that block. A target placed *beside* the
+  block only scrolls to it and changes nothing — this is why the original switcher, which pointed
+  at plain `#english` / `#chinese` anchors, looked right in the DOM and did nothing in the browser.
+  For the same reason the anchors are `<a id="…"></a>` elements rather than headings: they have to
+  be part of the block's content.
+- **The `user-content-` prefix in the `href` must match the `id` exactly.** GitHub prefixes every
+  `id` in a rendered README with `user-content-`, and the browser only expands the block when the
+  fragment it is given matches the element's real id. A link whose `href` was written as
+  `#readme-chinese-start` would not match `#user-content-readme-chinese-start` and would not
+  switch anything.
+
+If you edit either block, keep the `name` values equal, keep both inner anchors as the **first**
+element of their block, and keep the two header links pointing at them. A `<style>` tag would have
+been a simpler way to write this, but GitHub's sanitizer strips `<style>` and `<script>` from
+READMEs, so there is no CSS or JavaScript available to hide one language from the other.
+
 ---
 
 ## Reporting bugs

@@ -1,14 +1,16 @@
 # Agent Platform
 
 <div align="center">
-  <a href="#english">English</a> | <a href="#chinese">中文</a>
+  <a href="#user-content-readme-english-start">English</a> | <a href="#user-content-readme-chinese-start">中文</a>
 </div>
 
 <a id="english"></a>
 
-<details open>
+<details name="user-content-readme-lang" open>
 
-<summary><b>English</b> — click <a href="#chinese">中文</a> to switch</summary>
+<summary id="readme-english"><b>English</b> — click to expand / 点击展开；switch language: <a href="#user-content-readme-chinese-start">中文</a></summary>
+
+<a id="readme-english-start"></a>
 
 
 
@@ -1413,9 +1415,11 @@ requirements, and they are kept in Chinese deliberately.
 
 <a id="chinese"></a>
 
-<details>
+<details name="user-content-readme-lang">
 
-<summary><b>中文</b> — click <a href="#english">English</a> to switch</summary>
+<summary id="readme-chinese"><b>中文</b> — 点击展开 / click to expand；切换语言：<a href="#user-content-readme-english-start">English</a></summary>
+
+<a id="readme-chinese-start"></a>
 
 
 
@@ -2709,6 +2713,11 @@ GPU 专供 `gpt-oss-20b` 使用。
   也需要同步更新。
 - 本 README 的英文版与中文版都在这一个页面里（两个可折叠区块）。修改 README 时，请在同一个
   PR 中同步更新这两个区块，保持两者章节结构一致。
+- 这两个区块顶部的切换链接不是装饰：它们指向各自区块**内容内部**的锚点
+  （`#user-content-readme-english-start` 与 `#user-content-readme-chinese-start`），并且两个
+  `<details>` 带有相同的 `name` 属性。改 README 时请不要改坏这三处（两个 `name` 必须相同；两个
+  锚点必须留在各自区块内容的最前面；两个切换链接必须带 `user-content-` 前缀并与锚点 id 完全一致），
+  否则语言切换会退化成「只滚动、不切换」。具体机制见 `CONTRIBUTING.md`。
 
 ---
 
