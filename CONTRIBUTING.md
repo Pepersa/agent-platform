@@ -298,17 +298,21 @@ Documentation is updated in the same change as the code.
 | A file layout | The README's repository layout, `docs/development.md` |
 | A behaviour | `CHANGELOG.md`, under `Added` / `Changed` / `Fixed` |
 | A known problem | `docs/troubleshooting.md` |
-| The README | **Both** `README.md` and `README.zh-CN.md`, in the same PR |
+| The README | **Both** halves of the root `README.md`, in the same PR |
 
 The English documentation lives in `docs/` and the README. The Chinese design documents
 (`docs/01_*.md` through `docs/07_*.md`) are preserved as written and are **not** translated. They
 remain the authoritative source for the domain requirements, the metric definitions, and the
 rationale behind the design.
 
-The README itself is bilingual: `README.md` is the English landing page and `README.zh-CN.md` is its
-Simplified Chinese counterpart. Any README change must update **both** files in the same pull
-request — translate the prose, leave the code blocks byte-identical, and keep the section count and
-ordering the same in each so switching languages stays seamless.
+The README itself is bilingual, and both languages live in the **same root `README.md`** — the English
+text in the first `<details>` block and the Simplified Chinese text in the second. There is no
+separate `README.zh-CN.md`: GitHub renders the root README onto the repository landing page, which
+has no standalone URL, so a link to a README *file* would drop the reader into a `blob/` file view
+instead of keeping them on the landing page. Any README change must therefore update **both halves
+of the same file** in the same pull request — translate the prose, leave the code blocks
+byte-identical, and keep the section count and ordering the same in each so switching languages
+stays seamless.
 
 ---
 

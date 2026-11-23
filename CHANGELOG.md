@@ -21,11 +21,12 @@ prevents, because every one of them was found in production use.
 
 ### Added
 
-- **A bilingual README with a language switcher.** `README.md` is now the English landing page and
-  `README.zh-CN.md` carries a full Simplified Chinese translation of it — same sections, same
-  tables, same code blocks, same relative links. Both files carry a text-only switcher in the header
-  linking to the other, so a reader can read either language straight from GitHub or from a local
-  checkout. The English README also lists `README.zh-CN.md` in its documentation index.
+- **A bilingual README with a language switcher.** `README.md` was the English landing page and
+  `README.zh-CN.md` carried a full Simplified Chinese translation of it — same sections, same
+  tables, same code blocks, same relative links. Both files carried a text-only switcher in the header
+  linking to the other, so a reader could read either language straight from GitHub or from a local
+  checkout. This two-file layout was later consolidated into the single-page bilingual README
+  described under **Changed** below; `README.zh-CN.md` no longer exists.
 
 - **Configurable ReAct round limit on `/chat`.** The endpoint previously accepted no round budget
   at all, so the server always applied the hardcoded value regardless of what the client asked for.
@@ -85,6 +86,20 @@ prevents, because every one of them was found in production use.
   not enough to size a treemap.
 
 ### Changed
+
+- **The bilingual README was consolidated into a single landing page.** `README.zh-CN.md` was
+  deleted and its full Simplified Chinese translation now lives in the root `README.md`, below the
+  English text, in a second collapsible `<details>` block. The two-file layout could not keep the
+  reader on the repository landing page: GitHub renders the root README onto
+  `https://github.com/Pepersa/agent-platform`, but that landing page has no standalone URL, so any
+  link to a README *file* necessarily landed on the `blob/main/<file>` file view with the
+  Preview / Code / Blame / Raw toolbar — the reader left the landing page every time they switched
+  language. Both halves of the merged page are reachable through same-page anchors (`#english` and
+  `#chinese`), so switching language now keeps the browser on the landing page. Each block's
+  `<summary>` carries a link to the *other* block, so the switch still works when one half is
+  collapsed. The English and Chinese halves retain their original heading counts (22 `##` and 75
+  `###` each) and their 25 code blocks are byte-identical, so every table-of-contents anchor and
+  every relative link resolves exactly as before.
 
 - **The desktop build switched from `--onefile` to `--onedir`.** Onefile extracted the whole
   runtime — roughly **7.5 GB** — into `%TEMP%\_MEIxxxxxx` on every launch. Startup took **30 to 90
